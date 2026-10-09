@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read          # the workflow can only read your code, nothing more
+
+concurrency:              # a new push cancels the previous still-running run
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # --- JavaScript side ---
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: apps/web/package.json  
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+      - run: pnpm --dir apps/web install --frozen-lockfile
+
+      # --- Python side ---
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          working-directory: apps/api   
+      - run: uv sync --locked
+        working-directory: apps/api
+
+      # --- Makefile commands ---
+      - run: make lint
+      - run: make typecheck
+      - run: make test
+      

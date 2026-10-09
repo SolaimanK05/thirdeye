@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=https://lefthook.dev/schema.json
+
+pre-commit:
+  parallel: true
+  jobs:
+    - name: biome
+      root: apps/web/
+      glob: "*.{js,ts,cjs,mjs,jsx,tsx,json,jsonc,css}"
+      run: pnpm exec biome check --write --no-errors-on-unmatched --files-ignore-unknown=true {staged_files}
+      stage_fixed: true
+
+    - name: ruff
+      root: apps/api/
+      glob: "*.py"
+      run: uv run ruff check --fix {staged_files} && uv run ruff format {staged_files}
+      stage_fixed: true
