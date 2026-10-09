@@ -7,8 +7,7 @@ license = "MIT"
 authors = [
     { name = "SolaimanK05", email = "solaimankalam05@gmail.com" }
 ]
-[tool.mypy]
-strict = true
+
 requires-python = ">=3.14"
 dependencies = [
     "fastapi[standard]>=0.143.0",
@@ -35,3 +34,5 @@ dev = [
     "ruff>=0.16.10",
 ]
 
+[tool.mypy]
+strict = true
