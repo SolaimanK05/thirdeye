@@ -7,6 +7,7 @@ dev-api:
 dev-worker:
 	@echo "Does not exist yet."
 lint:
+	cd apps/api && uv lock --check
 	pnpm --dir apps/web exec biome check
 	cd apps/api && uv run ruff check .
 	cd apps/api && uv run ruff format --check .
