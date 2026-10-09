@@ -1,3 +1,5 @@
+<div align="center">
+
 # Third Eye
 
 [![CI](https://github.com/SolaimanK05/thirdeye/actions/workflows/ci.yml/badge.svg)](https://github.com/SolaimanK05/thirdeye/actions/workflows/ci.yml)
@@ -10,7 +12,13 @@
 
 A self-hosted OSINT console that puts public data feeds on one 3D globe, with a single search box across all of them.
 
-> **Early development.** So far this is the project skeleton: a Next.js app, a FastAPI app, linting, tests and CI. There's no globe yet.
+<div align="center">
+
+**Project is in Early Development !!!**
+
+</div>
+
+</div>
 
 ## What it will do
 

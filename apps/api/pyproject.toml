@@ -1,15 +1,14 @@
-[tool.mypy]
-strict = true
-
 [project]
 name = "thirdeye"
 version = "0.1.0"
-description = "Add your description here"
+description = "Self-hosted, open-source OSINT globe for exploring public open-data feeds on a 3D map."
 readme = "README.md"
 license = "MIT"
 authors = [
     { name = "SolaimanK05", email = "solaimankalam05@gmail.com" }
 ]
+[tool.mypy]
+strict = true
 requires-python = ">=3.14"
 dependencies = [
     "fastapi[standard]>=0.143.0",

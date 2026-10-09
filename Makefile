@@ -17,4 +17,3 @@ typecheck:
 test:
 	pnpm --dir apps/web exec vitest run
 	cd apps/api && uv run pytest
-	

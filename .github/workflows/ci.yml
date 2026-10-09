@@ -21,7 +21,7 @@ jobs:
       # --- JavaScript side ---
       - uses: pnpm/action-setup@v6
         with:
-          package_json_file: apps/web/package.json  
+          package_json_file: apps/web/package.json
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -32,7 +32,7 @@ jobs:
       # --- Python side ---
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          working-directory: apps/api   
+          working-directory: apps/api
       - run: uv sync --locked
         working-directory: apps/api
 
@@ -40,4 +40,3 @@ jobs:
       - run: make lint
       - run: make typecheck
       - run: make test
-      
