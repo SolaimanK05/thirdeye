@@ -53,3 +53,6 @@ __pycache__/
 apps/web/public/cesium/
 dist/
 *.egg-info/
+
+# Supabase
+supabase/snippets/
