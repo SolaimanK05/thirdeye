@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     db_pool_max_size: int = Field(default=5, ge=1)
     db_timeout_seconds: float = Field(default=5.0, gt=0)
     log_level: Literal["debug", "info", "warning", "error"] = "info"
+    log_format: Literal["pretty", "json"] = "pretty"
     public_instance: bool = False
     region_bbox: BBox = BBox(west=78.0, south=5.0, east=100.0, north=24.0)
     modules_enabled: list[str] = []
