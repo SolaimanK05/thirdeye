@@ -1,6 +1,7 @@
-from typing import Literal, NamedTuple
+from functools import lru_cache
+from typing import Literal, NamedTuple, Self
 
-from pydantic import PostgresDsn, field_validator
+from pydantic import Field, PostgresDsn, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,6 +16,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     database_url: PostgresDsn
+    db_pool_min_size: int = Field(default=1, ge=0)
+    db_pool_max_size: int = Field(default=5, ge=1)
+    db_timeout_seconds: float = Field(default=5.0, gt=0)
     log_level: Literal["debug", "info", "warning", "error"] = "info"
     public_instance: bool = False
     region_bbox: BBox = BBox(west=78.0, south=5.0, east=100.0, north=24.0)
@@ -43,3 +47,17 @@ class Settings(BaseSettings):
                 "boxes crossing the 180° meridian are not supported"
             )
         return box
+
+    @model_validator(mode="after")
+    def check_pool_sizes(self) -> Self:
+        if self.db_pool_min_size > self.db_pool_max_size:
+            raise ValueError(
+                f"db_pool_min_size ({self.db_pool_min_size}) must not exceed "
+                f"db_pool_max_size ({self.db_pool_max_size})"
+            )
+        return self
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
