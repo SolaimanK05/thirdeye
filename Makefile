@@ -1,11 +1,13 @@
 unexport PYTHONPATH
-.PHONY: dev-web dev-api dev-worker lint typecheck test
+.PHONY: dev-web dev-api dev-worker worker-once lint typecheck test
 dev-web:
 	pnpm --dir apps/web dev
 dev-api:
 	cd apps/api && uv run fastapi dev src/thirdeye/main.py
 dev-worker:
-	@echo "Does not exist yet."
+	cd apps/api && uv run python -m thirdeye.worker
+worker-once:
+	cd apps/api && uv run python -m thirdeye.worker --once
 lint:
 	cd apps/api && uv lock --check
 	pnpm --dir apps/web exec biome check
