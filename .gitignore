@@ -51,6 +51,7 @@ __pycache__/
 .mypy_cache/
 *:Zone.Identifier
 apps/web/public/cesium/
+apps/web/public/geo/
 dist/
 *.egg-info/
 

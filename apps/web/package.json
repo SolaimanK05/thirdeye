@@ -4,23 +4,34 @@
   "private": true,
   "license": "MIT",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "assets": "node scripts/copy-assets.mjs",
+    "dev": "node scripts/copy-assets.mjs && next dev",
+    "build": "node scripts/copy-assets.mjs && next build",
     "start": "next start",
     "lint": "biome check",
     "format": "biome format --write"
   },
   "dependencies": {
+    "@base-ui/react": "1.9.0",
+    "cesium": "1.146.0",
+    "d3-geo": "3.1.1",
+    "lucide-react": "1.55.0",
     "next": "16.4.0",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "topojson-client": "3.1.0",
+    "world-atlas": "2.0.2"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
     "@tailwindcss/turbopack": "^4",
+    "@types/d3-geo": "3.1.1",
+    "@types/geojson": "7946.0.16",
     "@types/node": "^24.19.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/topojson-client": "3.1.5",
+    "@types/topojson-specification": "1.0.5",
     "babel-plugin-react-compiler": "1.0.0",
     "tailwindcss": "^4",
     "typescript": "^7.0.2",
