@@ -73,8 +73,5 @@ export type ConsoleSnapshot = {
   hud: { entities: number; contacts: number; layers: number };
   domains: readonly DomainGroup[];
   starred: readonly StarredEntity[];
-  selection: Selection | null;
   alerts: { count: number; latest: string | null };
-  status: readonly StatusLine[];
-  attribution: readonly string[];
 };

@@ -34,3 +34,21 @@ export function formatUtc(at: Date): UtcParts {
 export function msUntilNextSecond(nowMs: number): number {
   return 1000 - (nowMs % 1000);
 }
+
+export function formatClock(at: Date): string {
+  return formatUtc(at).time;
+}
+
+export function formatShortDate(at: Date): string {
+  return `${pad(at.getUTCDate())} ${MONTHS[at.getUTCMonth()]}`;
+}
+
+export function relativeAge(then: Date, nowMs: number): string {
+  const seconds = Math.max(0, Math.round((nowMs - then.getTime()) / 1000));
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours} h ago`;
+  return `${Math.floor(hours / 24)} d ago`;
+}

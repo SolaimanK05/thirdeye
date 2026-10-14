@@ -4,7 +4,7 @@ import { GlobeArea } from "@/components/console/globe-area";
 import { Header } from "@/components/console/header";
 import { MobileMenu, ModuleRail } from "@/components/console/module-rail";
 import { SAMPLE } from "@/components/console/sample";
-import { SelectionPanel } from "@/components/console/selection-panel";
+import { LiveSelection } from "@/components/console/selection-live";
 
 export default function Home() {
   const snapshot = SAMPLE;
@@ -25,14 +25,13 @@ export default function Home() {
             starred={snapshot.starred}
             instance={snapshot.instance}
             sampleData={snapshot.sampleData}
-            status={snapshot.status}
           />
         }
       />
       <ModuleRail domains={snapshot.domains} starred={snapshot.starred} />
-      <GlobeArea hud={snapshot.hud} attribution={snapshot.attribution} />
-      <SelectionPanel selection={snapshot.selection} />
-      <Footer alerts={snapshot.alerts} status={snapshot.status} />
+      <GlobeArea hud={snapshot.hud} />
+      <LiveSelection />
+      <Footer alerts={snapshot.alerts} />
     </ConsoleShell>
   );
 }

@@ -40,3 +40,7 @@ jobs:
       - run: make lint
       - run: make typecheck
       - run: make test
+
+      # --- API contract: the generated types must match the API ---
+      - run: make api-types
+      - run: git diff --exit-code -- apps/web/src/api

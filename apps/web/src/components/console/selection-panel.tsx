@@ -2,7 +2,6 @@ import { Crosshair, LocateFixed, Star, TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
 import { cx } from "./cx";
 import { Disclosure } from "./disclosure";
-import { SelectionDock } from "./selection-dock";
 import { CONFIDENCE } from "./status";
 import type { ConfidenceTag, Selection, SelectionAction } from "./types";
 
@@ -33,27 +32,35 @@ const LEGEND: { tag: ConfidenceTag; word: string }[] = [
   { tag: "INF", word: "inferred" },
 ];
 
-export function SelectionPanel({ selection }: { selection: Selection | null }) {
+export function SelectionMessage({
+  children,
+  desktopOnly = false,
+}: {
+  children: ReactNode;
+  desktopOnly?: boolean;
+}) {
   return (
-    <SelectionDock
-      kind={selection?.kind ?? null}
-      name={selection?.name ?? null}
-    >
-      {selection ? (
-        <SelectionDetails selection={selection} />
-      ) : (
-        <div className="hidden flex-col gap-2 py-3.5 pr-4 pl-11 lg:flex">
-          <h2 className="text-ink-3 text-label">[ SELECTION ]</h2>
-          <p className="text-ink-2">
-            Select something on the globe, or search.
-          </p>
-        </div>
+    <div
+      className={cx(
+        "flex-col gap-2 px-4 py-3.5 lg:flex lg:pl-11",
+        desktopOnly ? "hidden" : "flex",
       )}
-    </SelectionDock>
+    >
+      <h2 className="hidden text-ink-3 text-label lg:block">[ SELECTION ]</h2>
+      <p role="status" className="text-ink-2">
+        {children}
+      </p>
+    </div>
   );
 }
 
-function SelectionDetails({ selection }: { selection: Selection }) {
+export function SelectionDetails({
+  selection,
+  onAction,
+}: {
+  selection: Selection;
+  onAction?: (action: SelectionAction) => void;
+}) {
   return (
     <>
       <Disclosure
@@ -81,6 +88,7 @@ function SelectionDetails({ selection }: { selection: Selection }) {
                 <button
                   key={action}
                   type="button"
+                  onClick={() => onAction?.(action)}
                   aria-label={label(selection.starred)}
                   aria-keyshortcuts={key}
                   title={label(selection.starred)}

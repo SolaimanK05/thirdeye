@@ -1,7 +1,7 @@
 import { Clock } from "./clock";
-import { StatusLines } from "./footer";
 import { GlobeStyleMenu } from "./globe-style-menu";
 import { ModuleList } from "./module-list";
+import { ModuleStatusLines } from "./module-status-lines";
 import { CollapsedStrip, SidebarBody } from "./sidebar-toggle";
 import type { ConsoleSnapshot } from "./types";
 
@@ -23,7 +23,7 @@ export function ModuleRail({ domains, starred }: Props) {
 
 type MenuProps = Pick<
   ConsoleSnapshot,
-  "domains" | "starred" | "instance" | "sampleData" | "status"
+  "domains" | "starred" | "instance" | "sampleData"
 >;
 
 export function MobileMenu({
@@ -31,7 +31,6 @@ export function MobileMenu({
   starred,
   instance,
   sampleData,
-  status,
 }: MenuProps) {
   return (
     <>
@@ -53,7 +52,7 @@ export function MobileMenu({
       <nav aria-label="Modules">
         <ModuleList domains={domains} starred={starred} />
       </nav>
-      <StatusLines status={status} className="border-line border-t px-3 py-3" />
+      <ModuleStatusLines className="border-line border-t px-3 py-3" />
     </>
   );
 }

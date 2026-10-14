@@ -21,7 +21,15 @@ class Health(BaseModel):
     version: str
 
 
-@router.get("/health")
+@router.get(
+    "/health",
+    responses={
+        status.HTTP_503_SERVICE_UNAVAILABLE: {
+            "model": Health,
+            "description": "Database unreachable",
+        }
+    },
+)
 async def health(
     pool: Annotated[Pool, Depends(get_pool)], response: Response
 ) -> Health:

@@ -1,5 +1,5 @@
 unexport PYTHONPATH
-.PHONY: dev-web dev-api dev-worker worker-once lint typecheck test
+.PHONY: dev-web dev-api dev-worker worker-once api-types lint typecheck test
 dev-web:
 	pnpm --dir apps/web dev
 dev-api:
@@ -8,6 +8,9 @@ dev-worker:
 	cd apps/api && uv run python -m thirdeye.worker
 worker-once:
 	cd apps/api && uv run python -m thirdeye.worker --once
+api-types:
+	cd apps/api && uv run python -m thirdeye.openapi ../web/src/api/openapi.json
+	pnpm --dir apps/web run api:types
 lint:
 	cd apps/api && uv lock --check
 	pnpm --dir apps/web exec biome check

@@ -1,14 +1,15 @@
 import { Bell, Play, Star } from "lucide-react";
 import { cx } from "./cx";
+import { ModuleStatusLines } from "./module-status-lines";
 import { HEALTH } from "./status";
 import type { ConsoleSnapshot, StatusLine } from "./types";
 
-type Props = Pick<ConsoleSnapshot, "alerts" | "status">;
+type Props = Pick<ConsoleSnapshot, "alerts">;
 
 const HOURS = Array.from({ length: 25 }, (_, hour) => hour);
 const TICK_LABELS = ["−24h", "−18h", "−12h", "−6h"];
 
-export function Footer({ alerts, status }: Props) {
+export function Footer({ alerts }: Props) {
   return (
     <footer className="hidden min-h-16 items-center gap-x-5 border-line border-t bg-ground px-4 py-2 [grid-area:footer] lg:flex">
       <AlertsButton
@@ -60,7 +61,7 @@ export function Footer({ alerts, status }: Props) {
         </div>
       </div>
 
-      <StatusLines status={status} className="items-end" />
+      <ModuleStatusLines className="items-end" />
     </footer>
   );
 }

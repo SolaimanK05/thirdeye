@@ -1,22 +1,29 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
+import { Providers } from "@/app/providers";
+import { quakeSelection } from "@/modules/earthquakes/selection";
+import { QUAKE_DETAIL } from "@/modules/earthquakes/test-data";
 import { ConsoleShell } from "./console-shell";
 import { Footer } from "./footer";
 import { GlobeArea } from "./globe-area";
 import { Header } from "./header";
 import { MobileMenu, ModuleRail } from "./module-rail";
 import { SAMPLE } from "./sample";
-import { SelectionPanel } from "./selection-panel";
-import type { Selection } from "./types";
+import { LiveSelection } from "./selection-live";
+import { SelectionDetails } from "./selection-panel";
 import { ZoomControl } from "./zoom-control";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 
-function renderConsole(selection: Selection | null = SAMPLE.selection) {
-  return renderToStaticMarkup(
+const render = (node: ReactNode) =>
+  renderToStaticMarkup(<Providers>{node}</Providers>);
+
+function renderConsole() {
+  return render(
     <ConsoleShell
       initialZoom={SAMPLE.zoomPercent}
       initialGlobeStyle={SAMPLE.globeStyle}
@@ -32,14 +39,13 @@ function renderConsole(selection: Selection | null = SAMPLE.selection) {
             starred={SAMPLE.starred}
             instance={SAMPLE.instance}
             sampleData={SAMPLE.sampleData}
-            status={SAMPLE.status}
           />
         }
       />
       <ModuleRail domains={SAMPLE.domains} starred={SAMPLE.starred} />
-      <GlobeArea hud={SAMPLE.hud} attribution={SAMPLE.attribution} />
-      <SelectionPanel selection={selection} />
-      <Footer alerts={SAMPLE.alerts} status={SAMPLE.status} />
+      <GlobeArea hud={SAMPLE.hud} />
+      <LiveSelection />
+      <Footer alerts={SAMPLE.alerts} />
     </ConsoleShell>,
   );
 }
@@ -82,7 +88,7 @@ describe("console structure", () => {
 
   test("text uses no middle-dot separators", () => {
     expect(visibleText(html)).not.toContain("·");
-    expect(visibleText(renderConsole(null))).not.toContain("·");
+    expect(visibleText(renderSelection())).not.toContain("·");
   });
 
   test("the phone layout has a menu button and a search button", () => {
@@ -109,24 +115,27 @@ describe("sidebars", () => {
   });
 
   test("every section is a disclosure with a heading and a chevron", () => {
-    const sections = [
+    const rail = [
       "[ MODULES ]",
       "EARTH",
       "MOVERS",
       "INFRASTRUCTURE",
       "Starred",
-      "[ EVENT ]",
-      "[ DETAILS ]",
-      "[ PROVENANCE ]",
     ];
-    const summaries = html.match(/<summary[\s\S]*?<\/summary>/g) ?? [];
-    for (const title of sections) {
-      const summary = summaries.find((s) => s.includes(title));
-      expect(summary, title).toBeDefined();
-      expect(summary, title).toMatch(/<h[23][\s>]/);
-      expect(summary, title).toContain("lucide-chevron-down");
+    const panel = ["[ EVENT ]", "[ DETAILS ]", "[ PROVENANCE ]"];
+    for (const [markup, sections] of [
+      [html, rail],
+      [renderSelection(), panel],
+    ] as const) {
+      const summaries = markup.match(/<summary[\s\S]*?<\/summary>/g) ?? [];
+      for (const title of sections) {
+        const summary = summaries.find((s) => s.includes(title));
+        expect(summary, title).toBeDefined();
+        expect(summary, title).toMatch(/<h[23][\s>]/);
+        expect(summary, title).toContain("lucide-chevron-down");
+      }
+      expect(count(markup, /<details open=""/g)).toBe(sections.length);
     }
-    expect(count(html, /<details open=""/g)).toBe(sections.length);
   });
 });
 
@@ -148,13 +157,13 @@ describe("zoom control", () => {
   });
 
   test("a different starting zoom moves everything with it", () => {
-    const zoomed = renderToStaticMarkup(
+    const zoomed = render(
       <ConsoleShell
         initialZoom={400}
         initialGlobeStyle="GREEN"
         initialCentre={SAMPLE.centre}
       >
-        <GlobeArea hud={SAMPLE.hud} attribution={SAMPLE.attribution} />
+        <GlobeArea hud={SAMPLE.hud} />
       </ConsoleShell>,
     );
     expect(zoomed).toContain("1,810 km, REGIONAL");
@@ -180,8 +189,14 @@ describe("globe", () => {
     expect(importing(/from "cesium"|import "cesium/)).toEqual([
       "globe-canvas.tsx",
       "globe-vectors.ts",
+      "marker-overlay.ts",
     ]);
     expect(importing(/from "\.\/globe-vectors"/)).toEqual(["globe-canvas.tsx"]);
+    expect(
+      importing(
+        /import \{[^}]*\bMarkerOverlay\b[^}]*\} from "\.\/marker-overlay"/,
+      ),
+    ).toEqual(["globe-canvas.tsx"]);
     expect(readFileSync(join(HERE, "globe-view.tsx"), "utf8")).toMatch(
       /ssr: false/,
     );
@@ -225,18 +240,35 @@ describe("module rail", () => {
   });
 });
 
+function renderSelection() {
+  return render(
+    <ConsoleShell
+      initialZoom={100}
+      initialGlobeStyle="GREEN"
+      initialCentre={SAMPLE.centre}
+    >
+      <SelectionDetails
+        selection={quakeSelection(
+          QUAKE_DETAIL,
+          Date.parse("2026-10-14T06:05:00Z"),
+        )}
+      />
+    </ConsoleShell>,
+  );
+}
+
 describe("selection panel", () => {
   test("prompts when nothing is selected", () => {
-    const html = renderConsole(null);
+    const html = renderConsole();
     expect(html).toContain("Select something on the globe, or search.");
     expect(html).toContain("Tap something on the globe.");
   });
 
   test("shows provenance and every limitation word for word", () => {
-    const html = renderConsole();
+    const html = renderSelection();
     expect(html).toContain("[ PROVENANCE ]");
     expect(html).toContain("LIMITS");
-    for (const limitation of SAMPLE.selection?.limitations ?? []) {
+    for (const limitation of QUAKE_DETAIL.provenance?.limitations ?? []) {
       expect(html).toContain(limitation);
     }
   });
@@ -248,9 +280,23 @@ describe("selection panel", () => {
   });
 
   test("each value carries a confidence tag with its meaning", () => {
-    const html = renderConsole();
+    const html = renderSelection();
     expect(html).toContain('title="observed by a sensor"');
     expect(html).toContain('title="derived (computed)"');
+  });
+});
+
+describe("live data placeholders", () => {
+  const html = renderConsole();
+
+  test("the footer waits for the API instead of showing sample health", () => {
+    expect(html).toContain("connecting to API");
+    expect(html).not.toContain("opensky cooldown");
+  });
+
+  test("no attribution is invented before the modules load", () => {
+    expect(html).not.toContain("Data:");
+    expect(html).not.toContain("AISStream.io");
   });
 });
 
@@ -285,17 +331,22 @@ describe("client boundary", () => {
       )
       .sort();
     expect(clientFiles).toEqual([
+      "attribution.tsx",
       "clock.tsx",
       "console-shell.tsx",
       "globe-canvas.tsx",
       "globe-hud.tsx",
       "globe-style-menu.tsx",
       "globe-view.tsx",
+      "layer-markers.tsx",
       "mobile-search.tsx",
       "module-list.tsx",
+      "module-status-lines.tsx",
       "modules-drawer.tsx",
       "selection-dock.tsx",
+      "selection-live.tsx",
       "sidebar-toggle.tsx",
+      "use-now.ts",
       "zoom-control.tsx",
     ]);
   });

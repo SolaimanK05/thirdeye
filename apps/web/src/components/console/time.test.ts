@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { formatUtc, msUntilNextSecond } from "./time";
+import { formatUtc, msUntilNextSecond, relativeAge } from "./time";
 
 describe("formatUtc", () => {
   test("formats the header clock in UTC", () => {
@@ -30,5 +30,21 @@ describe("msUntilNextSecond", () => {
     expect(msUntilNextSecond(1_000_250)).toBe(750);
     expect(msUntilNextSecond(1_000_999)).toBe(1);
     expect(msUntilNextSecond(1_000_000)).toBe(1000);
+  });
+});
+
+describe("relativeAge", () => {
+  const now = Date.parse("2026-10-14T06:00:00Z");
+  const ago = (seconds: number) => new Date(now - seconds * 1000);
+
+  test("rounds to the coarsest useful unit", () => {
+    expect(relativeAge(ago(5), now)).toBe("just now");
+    expect(relativeAge(ago(13 * 60), now)).toBe("13 min ago");
+    expect(relativeAge(ago(3 * 3600), now)).toBe("3 h ago");
+    expect(relativeAge(ago(3 * 86400), now)).toBe("3 d ago");
+  });
+
+  test("clock skew into the future reads as just now", () => {
+    expect(relativeAge(ago(-30), now)).toBe("just now");
   });
 });

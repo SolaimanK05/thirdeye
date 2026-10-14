@@ -13,14 +13,19 @@ import {
   ImageryLayer,
   PerspectiveFrustum,
   SceneTransforms,
+  ScreenSpaceEventHandler,
+  ScreenSpaceEventType,
   TileMapServiceImageryProvider,
 } from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
-import { useEffect, useEffectEvent, useRef } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useSelection } from "@/state/selection";
 import { useConsole } from "./console-shell";
 import { GLOBE_CREDITS_ID } from "./globe-config";
 import { isVectorStyle, mapDetailFor } from "./globe-style";
 import { createVectorGlobe, type VectorGlobe } from "./globe-vectors";
+import { LayerMarkers } from "./layer-markers";
+import { MarkerOverlay } from "./marker-overlay";
 import type { GlobeStyle } from "./types";
 import {
   cameraHeightKm,
@@ -88,10 +93,40 @@ function trackDisc(widget: CesiumWidget, element: HTMLElement) {
   });
 }
 
+function watchPointer(widget: CesiumWidget, overlay: MarkerOverlay) {
+  const canvas = widget.scene.canvas;
+  const handler = new ScreenSpaceEventHandler(canvas);
+  handler.setInputAction(
+    ({ position }: ScreenSpaceEventHandler.PositionedEvent) => {
+      const hit = overlay.hitTest(position.x, position.y);
+      useSelection
+        .getState()
+        .select(
+          hit
+            ? { kind: "event", id: hit.marker.id, moduleId: hit.moduleId }
+            : null,
+        );
+    },
+    ScreenSpaceEventType.LEFT_CLICK,
+  );
+  handler.setInputAction(
+    ({ endPosition }: ScreenSpaceEventHandler.MotionEvent) => {
+      const hit = overlay.hitTest(endPosition.x, endPosition.y);
+      canvas.style.cursor = hit ? "pointer" : "";
+    },
+    ScreenSpaceEventType.MOUSE_MOVE,
+  );
+  return () => handler.destroy();
+}
+
 export default function GlobeCanvas() {
   const frame = useRef<HTMLDivElement>(null);
   const container = useRef<HTMLDivElement>(null);
+  const markerCanvas = useRef<HTMLCanvasElement>(null);
   const globe = useRef<Globe | null>(null);
+  const [overlay, setOverlay] = useState<MarkerOverlay | null>(null);
+  const selectedId = useSelection((state) => state.selected?.id ?? null);
+  const focus = useSelection((state) => state.focus);
   const { zoomPercent, setZoomPercent, globeStyle, centre, setCentre } =
     useConsole();
 
@@ -109,8 +144,9 @@ export default function GlobeCanvas() {
   useEffect(() => {
     const element = container.current;
     const frameElement = frame.current;
+    const markerElement = markerCanvas.current;
     const creditElement = document.getElementById(GLOBE_CREDITS_ID);
-    if (!element || !frameElement || !creditElement) return;
+    if (!element || !frameElement || !markerElement || !creditElement) return;
 
     const start = startView();
     const imagery = ImageryLayer.fromProviderAsync(
@@ -175,6 +211,16 @@ export default function GlobeCanvas() {
     globe.current = current;
     applyStyle(current, start.globeStyle, start.zoomPercent);
 
+    const markers = new MarkerOverlay(widget, markerElement, {
+      default: cssValue("--color-ink-2"),
+      notable: cssValue("--color-amber"),
+      accent: cssValue("--color-accent"),
+      plate: cssValue("--color-panel"),
+      font: getComputedStyle(document.body).fontFamily,
+    });
+    const stopPointer = watchPointer(widget, markers);
+    setOverlay(markers);
+
     const removeFov = scene.preRender.addEventListener(fitFov);
     const removeDisc = trackDisc(widget, frameElement);
     const removeMoveEnd = camera.moveEnd.addEventListener(() =>
@@ -182,6 +228,9 @@ export default function GlobeCanvas() {
     );
 
     return () => {
+      setOverlay(null);
+      stopPointer();
+      markers.destroy();
       removeMoveEnd();
       removeDisc();
       removeFov();
@@ -212,6 +261,23 @@ export default function GlobeCanvas() {
     });
   }, [zoomPercent]);
 
+  useEffect(() => {
+    overlay?.setSelected(selectedId);
+  }, [overlay, selectedId]);
+
+  useEffect(() => {
+    const camera = globe.current?.widget.camera;
+    if (!camera || !focus) return;
+    camera.flyTo({
+      destination: Cartesian3.fromDegrees(
+        focus.at.lon,
+        focus.at.lat,
+        camera.positionCartographic.height,
+      ),
+      duration: FLY_SECONDS,
+    });
+  }, [focus]);
+
   return (
     <div ref={frame} data-look={globeStyle} className="globe-frame">
       <div className="globe-look">
@@ -230,6 +296,11 @@ export default function GlobeCanvas() {
         <div className="globe-glow" />
         <div className="globe-sweep" />
       </div>
+      <canvas
+        ref={markerCanvas}
+        className="pointer-events-none absolute inset-0 size-full"
+      />
+      {overlay && <LayerMarkers overlay={overlay} />}
     </div>
   );
 }

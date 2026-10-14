@@ -10,6 +10,8 @@ from thirdeye.config import Settings
 
 type Pool = AsyncConnectionPool[AsyncConnection[TupleRow]]
 
+SESSION_OPTIONS = "-c TimeZone=UTC"
+
 
 def create_pool(settings: Settings) -> Pool:
     return AsyncConnectionPool(
@@ -17,6 +19,7 @@ def create_pool(settings: Settings) -> Pool:
         min_size=settings.db_pool_min_size,
         max_size=settings.db_pool_max_size,
         timeout=settings.db_timeout_seconds,
+        kwargs={"options": SESSION_OPTIONS},
         check=AsyncConnectionPool.check_connection,
         open=False,
         name="thirdeye",

@@ -5,6 +5,7 @@
   "license": "MIT",
   "scripts": {
     "assets": "node scripts/copy-assets.mjs",
+    "api:types": "pnpm --package=openapi-typescript@7.13.0 --package=typescript@5.9.3 dlx openapi-typescript src/api/openapi.json -o src/api/schema.ts && biome format --write src/api",
     "dev": "node scripts/copy-assets.mjs && next dev",
     "build": "node scripts/copy-assets.mjs && next build",
     "start": "next start",
@@ -13,14 +14,17 @@
   },
   "dependencies": {
     "@base-ui/react": "1.9.0",
+    "@tanstack/react-query": "5.104.2",
     "cesium": "1.146.0",
     "d3-geo": "3.1.1",
     "lucide-react": "1.55.0",
     "next": "16.4.0",
+    "openapi-fetch": "0.17.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "topojson-client": "3.1.0",
-    "world-atlas": "2.0.2"
+    "world-atlas": "2.0.2",
+    "zustand": "5.0.15"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
