@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager, suppress
 from typing import Any
 
@@ -14,7 +14,7 @@ from thirdeye.errors import register_error_handlers
 from thirdeye.layers import Connect, LayerCache, Loader, listen_for_layers
 from thirdeye.logs import configure_logging
 from thirdeye.reads import DbReader, SnapshotRecord
-from thirdeye.registry import enabled
+from thirdeye.registry import REGISTRY, Module, check_default_on, enabled
 from thirdeye.routes import v1
 from thirdeye.routes.health import APP_VERSION
 
@@ -67,12 +67,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         log.info("api.stopped")
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None, registry: Mapping[str, Module] = REGISTRY
+) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings)
     app = FastAPI(title="Third Eye API", version=APP_VERSION, lifespan=lifespan)
     app.state.settings = settings
-    app.state.enabled_modules = {m.id: m for m in enabled(settings.modules_enabled)}
+    app.state.registry = registry
+    app.state.enabled_modules = {
+        m.id: m for m in enabled(settings.modules_enabled, registry)
+    }
+    app.state.default_on = check_default_on(
+        (
+            settings.modules_enabled
+            if settings.modules_default_on is None
+            else settings.modules_default_on
+        ),
+        registry,
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,

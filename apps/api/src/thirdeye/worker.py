@@ -88,7 +88,14 @@ def http_client() -> httpx.AsyncClient:
 
 
 async def run(settings: Settings, *, once: bool) -> int:
-    modules = enabled(settings.modules_enabled)
+    modules = []
+    for module in enabled(settings.modules_enabled):
+        if module.key_missing(settings):
+            log.warning(
+                "module.skipped_no_key", module=module.id, key=module.manifest.key_env
+            )
+            continue
+        modules.append(module)
     if not modules:
         log.warning("worker.no_modules", hint="set MODULES_ENABLED")
         return 0

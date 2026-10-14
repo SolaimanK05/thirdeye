@@ -1,16 +1,17 @@
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 from fastapi import APIRouter
 from pydantic import AwareDatetime
 
-from thirdeye.deps import EnabledDep, ReaderDep
+from thirdeye.deps import DefaultOnDep, EnabledDep, ReaderDep, RegistryDep, SettingsDep
 from thirdeye.ontology import Domain
 from thirdeye.reads import HealthRecord
-from thirdeye.registry import REGISTRY
 from thirdeye.routes.models import HealthState, Out, ProvenanceOut, provenance_out
 
 STALE_AFTER_CADENCES = 3
 STALE_AFTER_MIN_SECONDS = 180
+DOMAIN_ORDER = {domain: index for index, domain in enumerate(Domain)}
 
 router = APIRouter(tags=["modules"])
 
@@ -36,6 +37,8 @@ class ModuleOut(Out):
     cadence_seconds: int
     zoom_range: ZoomRange | None
     requires_key: bool
+    key_env: str | None
+    default_filter: Literal["all", "none"]
     provenance: ProvenanceOut
     health: HealthOut
 
@@ -49,8 +52,14 @@ def stale_after(cadence_seconds: int) -> timedelta | None:
 
 
 def module_state(
-    record: HealthRecord | None, cadence_seconds: int, now: datetime
+    record: HealthRecord | None,
+    cadence_seconds: int,
+    now: datetime,
+    *,
+    key_missing: bool = False,
 ) -> HealthState:
+    if key_missing:
+        return "missing_key"
     if record is None:
         return "pending"
     if record.status == "failed":
@@ -64,11 +73,15 @@ def module_state(
 
 
 def health_out(
-    record: HealthRecord | None, cadence_seconds: int, now: datetime
+    record: HealthRecord | None,
+    cadence_seconds: int,
+    now: datetime,
+    *,
+    key_missing: bool = False,
 ) -> HealthOut:
     limit = stale_after(cadence_seconds)
     return HealthOut(
-        state=module_state(record, cadence_seconds, now),
+        state=module_state(record, cadence_seconds, now, key_missing=key_missing),
         fetched_at=None if record is None else record.fetched_at,
         record_count=0 if record is None else record.record_count,
         reason=None if record is None else record.reason,
@@ -77,18 +90,25 @@ def health_out(
 
 
 @router.get("/modules")
-async def list_modules(reader: ReaderDep, enabled: EnabledDep) -> list[ModuleOut]:
+async def list_modules(
+    reader: ReaderDep,
+    enabled: EnabledDep,
+    registry: RegistryDep,
+    settings: SettingsDep,
+    default_on: DefaultOnDep,
+) -> list[ModuleOut]:
     health = await reader.health()
     now = datetime.now(UTC)
+    ordered = sorted(registry.values(), key=lambda m: DOMAIN_ORDER[m.manifest.domain])
     modules: list[ModuleOut] = []
-    for module_id, module in REGISTRY.items():
+    for module in ordered:
         manifest = module.manifest
         modules.append(
             ModuleOut(
-                id=module_id,
+                id=module.id,
                 name=manifest.name,
                 domain=manifest.domain,
-                enabled=module_id in enabled,
+                enabled=module.id in enabled,
                 cadence_seconds=manifest.cadence_seconds,
                 zoom_range=(
                     None
@@ -98,8 +118,15 @@ async def list_modules(reader: ReaderDep, enabled: EnabledDep) -> list[ModuleOut
                     )
                 ),
                 requires_key=manifest.requires_key,
+                key_env=manifest.key_env,
+                default_filter="all" if module.id in default_on else "none",
                 provenance=provenance_out(manifest),
-                health=health_out(health.get(module_id), manifest.cadence_seconds, now),
+                health=health_out(
+                    health.get(module.id),
+                    manifest.cadence_seconds,
+                    now,
+                    key_missing=module.key_missing(settings),
+                ),
             )
         )
     return modules

@@ -1,12 +1,15 @@
 "use client";
 
-import { ChevronDown, Star } from "lucide-react";
+import { Star } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { useFilters } from "@/state/filters";
 import { useConsole } from "./console-shell";
 import { cx } from "./cx";
 import { Disclosure } from "./disclosure";
+import { type FilterChoice, FilterMenu } from "./filter-menu";
 import {
+  drawsAnything,
   everyModuleFilter,
-  FILTER_LABEL,
   HEALTH,
   inRange,
   isOn,
@@ -15,15 +18,14 @@ import {
   railCounts,
 } from "./status";
 import type {
-  ConsoleSnapshot,
+  DomainGroup,
   Filter,
   ModuleRow,
   StarredEntity,
   ZoomLevel,
 } from "./types";
+import { useRail } from "./use-rail";
 import { zoomLevelFor } from "./zoom";
-
-type Props = Pick<ConsoleSnapshot, "domains" | "starred">;
 
 const NOTE_TONE: Record<ModuleNote["tone"], string> = {
   "ink-3": "text-ink-3",
@@ -38,11 +40,162 @@ const AGE_TONE: Record<StarredEntity["tone"], string> = {
   gap: "text-red",
 };
 
-export function ModuleList({ domains, starred }: Props) {
+const NO_STARRED: readonly StarredEntity[] = [];
+
+const SKELETON_ROWS = ["a", "b", "c"] as const;
+
+function rowChoices(row: ModuleRow): FilterChoice[] {
+  return [
+    {
+      value: "all",
+      label: "ALL",
+      detail: "Draw everything in range",
+      count: row.loaded,
+    },
+    {
+      value: "starred",
+      label: "STARRED",
+      detail:
+        row.starredCount > 0
+          ? "Only starred items"
+          : "Nothing starred in this module",
+      count: row.starredCount,
+    },
+    {
+      value: "none",
+      label: "NONE",
+      detail: "Hide it. Still loads and keeps alerting",
+    },
+  ];
+}
+
+function everyChoices(rows: readonly ModuleRow[]): FilterChoice[] {
+  const count = (filter: Filter) =>
+    rows.filter((row) => row.filter === filter).length;
+  return [
+    {
+      value: "all",
+      label: "ALL EVERYWHERE",
+      detail: "Every module draws everything",
+      count: count("all"),
+    },
+    {
+      value: "starred",
+      label: "STARRED EVERYWHERE",
+      detail: "Every module draws starred items only",
+      count: count("starred"),
+    },
+    {
+      value: "none",
+      label: "NONE EVERYWHERE",
+      detail: "Hide everything. Modules keep loading",
+      count: count("none"),
+    },
+  ];
+}
+
+function isTyping(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLElement &&
+    (target.isContentEditable ||
+      target.tagName === "INPUT" ||
+      target.tagName === "TEXTAREA" ||
+      target.tagName === "SELECT")
+  );
+}
+
+function EveryModuleFilter({ domains }: { domains: readonly DomainGroup[] }) {
+  const setFilters = useFilters((state) => state.setFilters);
+  const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const rows = domains
+    .flatMap((domain) => domain.modules)
+    .filter((row) => row.health !== "missing-key");
+  const value = everyModuleFilter(domains);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.key !== "g" ||
+        event.repeat ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.shiftKey ||
+        isTyping(event.target) ||
+        document.querySelector('[role="menu"]')
+      ) {
+        return;
+      }
+      if (!trigger.current?.checkVisibility()) return;
+      event.preventDefault();
+      setOpen(true);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  return (
+    <FilterMenu
+      name="Every module"
+      value={value}
+      choices={everyChoices(rows)}
+      onChange={(filter) =>
+        setFilters(
+          rows.map((row) => row.id),
+          filter,
+        )
+      }
+      dim={value === "mixed"}
+      className="w-28 xl:w-30"
+      open={open}
+      onOpenChange={setOpen}
+      triggerRef={trigger}
+    />
+  );
+}
+
+function RailMessage({
+  role,
+  tone = "text-ink-3",
+  children,
+}: {
+  role: "status" | "alert";
+  tone?: string;
+  children: string;
+}) {
+  return (
+    <p role={role} className={cx("px-3 pb-2 text-secondary", tone)}>
+      {children}
+    </p>
+  );
+}
+
+function SkeletonRows() {
+  return (
+    <div role="status" className="flex flex-col gap-3 px-3 py-2">
+      <span className="sr-only">Loading modules</span>
+      {SKELETON_ROWS.map((key) => (
+        <span
+          key={key}
+          aria-hidden="true"
+          className="grid animate-pulse grid-cols-[24px_minmax(0,1fr)_80px] items-center gap-x-2 motion-reduce:animate-none"
+        >
+          <span className="h-3 bg-well" />
+          <span className="h-3 w-3/5 bg-well" />
+          <span className="h-6.5 border border-line-2" />
+        </span>
+      ))}
+    </div>
+  );
+}
+
+export function ModuleList() {
   const { zoomPercent } = useConsole();
   const zoom = zoomLevelFor(zoomPercent).level;
+  const { status, domains } = useRail();
+  const starred = NO_STARRED;
   const { on, drawn } = railCounts(domains, zoom);
-  const every = everyModuleFilter(domains);
 
   return (
     <>
@@ -50,24 +203,35 @@ export function ModuleList({ domains, starred }: Props) {
         title="[ MODULES ]"
         meta={
           <span className="text-ink-3 text-label tracking-normal tabular-nums">
-            {on} on, {drawn} drawn
+            {status === "ready" && domains.length > 0
+              ? `${on} on, ${drawn} drawn`
+              : ""}
           </span>
         }
         className="border-line border-b"
         summaryClassName="px-3 pt-1 lg:in-data-[rail=left]:pr-11"
         titleClassName="whitespace-nowrap"
       >
-        <div className="flex items-center justify-between gap-2 px-3 pt-1 pb-2.5">
-          <span className="whitespace-nowrap text-ink-2 text-label tracking-normal xl:tracking-[0.08em]">
-            EVERY MODULE <kbd className="text-ink-3">[g]</kbd>
-          </span>
-          <FilterButton
-            name="Every module"
-            value={every}
-            dim={every === "mixed"}
-            className="w-28 xl:w-30"
-          />
-        </div>
+        {status === "loading" && <SkeletonRows />}
+        {status === "error" && (
+          <RailMessage role="alert" tone="text-red">
+            API unreachable. Retrying.
+          </RailMessage>
+        )}
+        {status === "ready" && domains.length === 0 && (
+          <RailMessage role="status">
+            No modules enabled. Set MODULES_ENABLED.
+          </RailMessage>
+        )}
+
+        {status === "ready" && domains.length > 0 && (
+          <div className="flex items-center justify-between gap-2 px-3 pt-1 pb-2.5">
+            <span className="whitespace-nowrap text-ink-2 text-label tracking-normal xl:tracking-[0.08em]">
+              EVERY MODULE <kbd className="text-ink-3">[g]</kbd>
+            </span>
+            <EveryModuleFilter domains={domains} />
+          </div>
+        )}
 
         {domains.map((domain) => (
           <Disclosure
@@ -139,7 +303,7 @@ function ModuleRowItem({ row, zoom }: { row: ModuleRow; zoom: ZoomLevel }) {
   const health = HEALTH[row.health];
   const note = moduleNote(row, zoom);
   const on = isOn(row);
-  const shown = on && inRange(row, zoom);
+  const shown = drawsAnything(row) && inRange(row, zoom);
 
   return (
     <li className="grid grid-cols-[24px_minmax(0,1fr)_32px_88px] items-center gap-x-1.5 gap-y-1 py-1.5 pr-2.5 pl-3 transition-colors duration-120 ease-out hover-fine:bg-well lg:grid-cols-[22px_minmax(0,1fr)_28px_80px] xl:grid-cols-[24px_minmax(0,1fr)_32px_88px]">
@@ -164,12 +328,7 @@ function ModuleRowItem({ row, zoom }: { row: ModuleRow; zoom: ZoomLevel }) {
           NO KEY
         </span>
       ) : (
-        <FilterButton
-          name={row.name}
-          value={row.filter}
-          dim={!shown}
-          className="w-full"
-        />
+        <RowFilter row={row} dim={!shown} />
       )}
 
       <span className="col-span-3 col-start-2 flex min-w-0 items-center gap-1.5">
@@ -224,41 +383,16 @@ function RangeBars({
   );
 }
 
-const FILTER_TONE: Record<Filter | "mixed", string> = {
-  all: "text-ink",
-  starred: "text-amber",
-  none: "text-ink-3",
-  mixed: "text-ink-2",
-};
-
-function FilterButton({
-  name,
-  value,
-  dim,
-  className,
-}: {
-  name: string;
-  value: Filter | "mixed";
-  dim: boolean;
-  className: string;
-}) {
-  const label = FILTER_LABEL[value];
+function RowFilter({ row, dim }: { row: ModuleRow; dim: boolean }) {
+  const setFilter = useFilters((state) => state.setFilter);
   return (
-    <button
-      type="button"
-      aria-label={`${name} filter: ${label.toLowerCase()}`}
-      className={cx(
-        "flex h-6.5 items-center justify-between gap-1 border border-line-2 px-1.5 text-label tracking-normal transition-colors duration-120 ease-out hover-fine:border-ink-3 xl:px-1.75",
-        value === "all" && dim ? "text-ink-2" : FILTER_TONE[value],
-        className,
-      )}
-    >
-      {value === "starred" ? (
-        <Star size={13} aria-hidden="true" />
-      ) : (
-        <span aria-hidden="true">{label}</span>
-      )}
-      <ChevronDown size={12} aria-hidden="true" className="text-ink-3" />
-    </button>
+    <FilterMenu
+      name={row.name}
+      value={row.filter}
+      choices={rowChoices(row)}
+      onChange={(filter) => setFilter(row.id, filter)}
+      dim={dim}
+      className="w-full"
+    />
   );
 }

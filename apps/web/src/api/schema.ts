@@ -251,7 +251,13 @@ export interface components {
       stale_after_seconds: number | null;
     };
     /** @enum {string} */
-    HealthState: "fresh" | "stale" | "failed" | "empty" | "pending";
+    HealthState:
+      | "fresh"
+      | "stale"
+      | "failed"
+      | "empty"
+      | "pending"
+      | "missing_key";
     JsonValue: unknown;
     /** Layer */
     Layer: {
@@ -278,6 +284,13 @@ export interface components {
       zoom_range: components["schemas"]["ZoomRange"] | null;
       /** Requires Key */
       requires_key: boolean;
+      /** Key Env */
+      key_env: string | null;
+      /**
+       * Default Filter
+       * @enum {string}
+       */
+      default_filter: "all" | "none";
       provenance: components["schemas"]["ProvenanceOut"];
       health: components["schemas"]["HealthOut"];
     };

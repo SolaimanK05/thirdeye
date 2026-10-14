@@ -5,7 +5,9 @@ from pydantic import BaseModel, ConfigDict
 from thirdeye.ontology import Confidence, ModuleManifest, SourceReliability
 from thirdeye.reads import SourceRecord
 
-type HealthState = Literal["fresh", "stale", "failed", "empty", "pending"]
+type HealthState = Literal[
+    "fresh", "stale", "failed", "empty", "pending", "missing_key"
+]
 
 
 class Out(BaseModel):

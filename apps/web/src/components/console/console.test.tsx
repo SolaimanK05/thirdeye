@@ -1,18 +1,22 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
+import type { ModuleInfo } from "@/api/client";
+import { queryKeys } from "@/api/queries";
+import { moduleInfo } from "@/api/test-data";
 import { Providers } from "@/app/providers";
 import { quakeSelection } from "@/modules/earthquakes/selection";
 import { QUAKE_DETAIL } from "@/modules/earthquakes/test-data";
 import { ConsoleShell } from "./console-shell";
+import { CONSOLE_DEFAULTS, DEFAULT_INSTANCE_NAME } from "./defaults";
 import { Footer } from "./footer";
 import { GlobeArea } from "./globe-area";
 import { Header } from "./header";
 import { MobileMenu, ModuleRail } from "./module-rail";
-import { SAMPLE } from "./sample";
 import { LiveSelection } from "./selection-live";
 import { SelectionDetails } from "./selection-panel";
 import { ZoomControl } from "./zoom-control";
@@ -22,31 +26,36 @@ const HERE = fileURLToPath(new URL(".", import.meta.url));
 const render = (node: ReactNode) =>
   renderToStaticMarkup(<Providers>{node}</Providers>);
 
-function renderConsole() {
-  return render(
+function consoleTree() {
+  const { zoomPercent, globeStyle, centre, alerts } = CONSOLE_DEFAULTS;
+  return (
     <ConsoleShell
-      initialZoom={SAMPLE.zoomPercent}
-      initialGlobeStyle={SAMPLE.globeStyle}
-      initialCentre={SAMPLE.centre}
+      initialZoom={zoomPercent}
+      initialGlobeStyle={globeStyle}
+      initialCentre={centre}
     >
       <Header
-        instance={SAMPLE.instance}
-        sampleData={SAMPLE.sampleData}
-        alerts={SAMPLE.alerts}
-        menu={
-          <MobileMenu
-            domains={SAMPLE.domains}
-            starred={SAMPLE.starred}
-            instance={SAMPLE.instance}
-            sampleData={SAMPLE.sampleData}
-          />
-        }
+        instance={DEFAULT_INSTANCE_NAME}
+        alerts={alerts}
+        menu={<MobileMenu instance={DEFAULT_INSTANCE_NAME} />}
       />
-      <ModuleRail domains={SAMPLE.domains} starred={SAMPLE.starred} />
-      <GlobeArea hud={SAMPLE.hud} />
+      <ModuleRail />
+      <GlobeArea />
       <LiveSelection />
-      <Footer alerts={SAMPLE.alerts} />
-    </ConsoleShell>,
+      <Footer alerts={alerts} />
+    </ConsoleShell>
+  );
+}
+
+function renderConsole() {
+  return render(consoleTree());
+}
+
+function renderWithModules(modules: readonly ModuleInfo[]) {
+  const client = new QueryClient();
+  client.setQueryData(queryKeys.modules, [...modules]);
+  return renderToStaticMarkup(
+    <QueryClientProvider client={client}>{consoleTree()}</QueryClientProvider>,
   );
 }
 
@@ -73,7 +82,7 @@ describe("console structure", () => {
 
   test("every button declares its type", () => {
     const buttons = count(html, /<button[\s>]/g);
-    expect(buttons).toBeGreaterThan(10);
+    expect(buttons).toBeGreaterThan(5);
     expect(count(html, /<button[^>]*\stype="button"/g)).toBe(buttons);
   });
 
@@ -115,13 +124,7 @@ describe("sidebars", () => {
   });
 
   test("every section is a disclosure with a heading and a chevron", () => {
-    const rail = [
-      "[ MODULES ]",
-      "EARTH",
-      "MOVERS",
-      "INFRASTRUCTURE",
-      "Starred",
-    ];
+    const rail = ["[ MODULES ]", "Starred"];
     const panel = ["[ EVENT ]", "[ DETAILS ]", "[ PROVENANCE ]"];
     for (const [markup, sections] of [
       [html, rail],
@@ -161,9 +164,9 @@ describe("zoom control", () => {
       <ConsoleShell
         initialZoom={400}
         initialGlobeStyle="GREEN"
-        initialCentre={SAMPLE.centre}
+        initialCentre={CONSOLE_DEFAULTS.centre}
       >
-        <GlobeArea hud={SAMPLE.hud} />
+        <GlobeArea />
       </ConsoleShell>,
     );
     expect(zoomed).toContain("1,810 km, REGIONAL");
@@ -212,31 +215,150 @@ describe("globe style", () => {
 });
 
 describe("module rail", () => {
-  const html = renderConsole();
+  const quakes = moduleInfo("earthquakes", "USGS", {
+    name: "Earthquakes",
+    cadence_seconds: 60,
+  });
+  const wildfires = moduleInfo(
+    "wildfires",
+    "FIRMS",
+    {
+      name: "Wildfires",
+      requires_key: true,
+      key_env: "FIRMS_MAP_KEY",
+      zoom_range: { min: 2, max: 4 },
+    },
+    { state: "missing_key", fetched_at: null, record_count: 0 },
+  );
+  const aircraft = moduleInfo(
+    "aircraft",
+    "OpenSky",
+    { name: "Aircraft", domain: "movers", zoom_range: { min: 2, max: 4 } },
+    { state: "stale" },
+  );
+
+  test("before the API answers it shows a skeleton, not invented modules", () => {
+    const html = renderConsole();
+    expect(html).toContain("Loading modules");
+    expect(html).not.toContain("Earthquakes");
+    expect(html).not.toContain("FIRMS_MAP_KEY");
+    expect(html).not.toContain("SAMPLE");
+    expect(html).not.toContain("EVERY MODULE");
+  });
+
+  test("lists what the API sends, grouped under its domain", () => {
+    const html = renderWithModules([quakes, wildfires, aircraft]);
+    expect(html).toContain("Earthquakes");
+    expect(html).toContain("Aircraft");
+    const summaries = html.match(/<summary[\s\S]*?<\/summary>/g) ?? [];
+    for (const title of ["EARTH", "MOVERS"]) {
+      expect(
+        summaries.some((s) => s.includes(title)),
+        title,
+      ).toBe(true);
+    }
+    expect(visibleText(html)).not.toContain("INFRASTRUCTURE");
+  });
+
+  test("a module the frontend has never heard of appears with no code change", () => {
+    const html = renderWithModules([
+      quakes,
+      moduleInfo("brand-new", "Somebody", {
+        name: "Brand New Feed",
+        domain: "street",
+      }),
+    ]);
+    expect(html).toContain("Brand New Feed");
+    expect(html).toContain('aria-label="Brand New Feed filter: all"');
+    expect(visibleText(html)).toContain("STREET");
+  });
+
+  test("modules that are not enabled are not listed", () => {
+    const html = renderWithModules([
+      quakes,
+      moduleInfo("off", "Off", { name: "Switched Off", enabled: false }),
+    ]);
+    expect(html).not.toContain("Switched Off");
+  });
+
+  test("every button in the loaded rail declares its type", () => {
+    const html = renderWithModules([quakes, aircraft, wildfires]);
+    const buttons = count(html, /<button[\s>]/g);
+    expect(buttons).toBeGreaterThan(5);
+    expect(count(html, /<button[^>]*\stype="button"/g)).toBe(buttons);
+  });
 
   test("health glyphs carry a text label for screen readers", () => {
+    const html = renderWithModules([quakes, aircraft]);
     expect(html).toContain('<span aria-hidden="true">[+]</span>');
     expect(html).toContain('<span class="sr-only">fresh</span>');
+    expect(html).toContain('<span aria-hidden="true">[!]</span>');
     expect(html).toContain(
       '<span class="sr-only">stale, serving last good</span>',
     );
   });
 
+  test("a failed module shows [E] and its reason", () => {
+    const html = renderWithModules([
+      moduleInfo(
+        "x",
+        "X",
+        { name: "Broken" },
+        {
+          state: "failed",
+          reason: "HTTP 503",
+        },
+      ),
+    ]);
+    expect(html).toContain('<span aria-hidden="true">[E]</span>');
+    expect(visibleText(html)).toContain("HTTP 503");
+  });
+
   test("a module without its key says which key and has no filter", () => {
+    const html = renderWithModules([quakes, wildfires]);
+    expect(html).toContain('<span aria-hidden="true">[K]</span>');
     expect(html).toContain("needs FIRMS_MAP_KEY");
     expect(html).toContain("NO KEY");
     expect(html).not.toContain('aria-label="Wildfires filter');
     expect(html).toContain('aria-label="Earthquakes filter: all"');
   });
 
+  test("filters start from the server default", () => {
+    const html = renderWithModules([
+      quakes,
+      moduleInfo("quiet", "Q", { name: "Quiet", default_filter: "none" }),
+    ]);
+    expect(html).toContain('aria-label="Earthquakes filter: all"');
+    expect(html).toContain('aria-label="Quiet filter: none"');
+  });
+
+  test("the global control reads the shared value when they agree", () => {
+    const html = renderWithModules([quakes, aircraft]);
+    expect(html).toContain('aria-label="Every module filter: all"');
+    expect(html).toContain("EVERY MODULE");
+  });
+
   test("summarises modules on and drawn", () => {
-    expect(html).toContain("5 on, 5 drawn");
+    expect(renderWithModules([quakes, aircraft, wildfires])).toContain(
+      "2 on, 2 drawn",
+    );
   });
 
   test("notes describe zoom in percent", () => {
+    const html = renderWithModules([quakes, aircraft]);
     expect(html).toContain("auto, any zoom");
-    expect(html).toContain("auto from 60%");
-    expect(html).toContain("auto to 199%");
+    expect(html).toContain("last good 05:59:12Z");
+  });
+
+  test("an API with nothing enabled says how to enable something", () => {
+    expect(renderWithModules([])).toContain("No modules enabled");
+  });
+
+  test("the sample badge and sample numbers are gone", () => {
+    const html = renderWithModules([quakes]);
+    expect(html).not.toContain("SAMPLE");
+    expect(html).not.toContain("entities");
+    expect(html).not.toContain("contacts");
   });
 });
 
@@ -245,7 +367,7 @@ function renderSelection() {
     <ConsoleShell
       initialZoom={100}
       initialGlobeStyle="GREEN"
-      initialCentre={SAMPLE.centre}
+      initialCentre={CONSOLE_DEFAULTS.centre}
     >
       <SelectionDetails
         selection={quakeSelection(
@@ -314,6 +436,7 @@ describe("client boundary", () => {
       "globe-area.tsx",
       "header.tsx",
       "module-rail.tsx",
+      "rail.ts",
       "search-field.tsx",
       "selection-panel.tsx",
     ];
@@ -334,6 +457,7 @@ describe("client boundary", () => {
       "attribution.tsx",
       "clock.tsx",
       "console-shell.tsx",
+      "filter-menu.tsx",
       "globe-canvas.tsx",
       "globe-hud.tsx",
       "globe-style-menu.tsx",
@@ -347,6 +471,7 @@ describe("client boundary", () => {
       "selection-live.tsx",
       "sidebar-toggle.tsx",
       "use-now.ts",
+      "use-rail.ts",
       "zoom-control.tsx",
     ]);
   });

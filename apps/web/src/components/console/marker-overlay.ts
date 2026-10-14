@@ -71,6 +71,19 @@ function trianglePath(
   ctx.closePath();
 }
 
+export type InViewReport = (counts: Readonly<Record<string, number>>) => void;
+
+function sameCounts(
+  a: Readonly<Record<string, number>>,
+  b: Readonly<Record<string, number>>,
+): boolean {
+  const keys = Object.keys(a);
+  return (
+    keys.length === Object.keys(b).length &&
+    keys.every((key) => a[key] === b[key])
+  );
+}
+
 export class MarkerOverlay {
   private readonly widget: CesiumWidget;
   private readonly canvas: HTMLCanvasElement;
@@ -79,16 +92,21 @@ export class MarkerOverlay {
   private readonly scratch = new Cartesian2();
   private readonly camera = new Cartesian3();
   private readonly removeListener: () => void;
+  private readonly hidden = new Set<string>();
+  private readonly report: InViewReport | undefined;
+  private counts: Readonly<Record<string, number>> = {};
   private selectedId: string | null = null;
 
   constructor(
     widget: CesiumWidget,
     canvas: HTMLCanvasElement,
     palette: MarkerPalette,
+    report?: InViewReport,
   ) {
     this.widget = widget;
     this.canvas = canvas;
     this.palette = palette;
+    this.report = report;
     this.removeListener = widget.scene.postRender.addEventListener(() =>
       this.draw(),
     );
@@ -111,6 +129,13 @@ export class MarkerOverlay {
     if (this.layers.delete(moduleId)) this.widget.scene.requestRender();
   }
 
+  setVisible(moduleId: string, visible: boolean) {
+    if (visible === !this.hidden.has(moduleId)) return;
+    if (visible) this.hidden.delete(moduleId);
+    else this.hidden.add(moduleId);
+    this.widget.scene.requestRender();
+  }
+
   setSelected(id: string | null) {
     if (id === this.selectedId) return;
     this.selectedId = id;
@@ -121,6 +146,7 @@ export class MarkerOverlay {
     let best: { moduleId: string; marker: Marker } | null = null;
     let bestDistance = HIT_RADIUS_PX * HIT_RADIUS_PX;
     for (const [moduleId, layer] of this.layers) {
+      if (this.hidden.has(moduleId)) continue;
       for (let i = 0; i < layer.placed.length; i++) {
         if (!layer.visible[i]) continue;
         const dx = layer.x[i] - x;
@@ -138,6 +164,9 @@ export class MarkerOverlay {
   destroy() {
     this.removeListener();
     this.layers.clear();
+    this.hidden.clear();
+    this.counts = {};
+    this.report?.({});
     this.context()?.clearRect(0, 0, this.canvas.width, this.canvas.height);
   }
 
@@ -171,11 +200,14 @@ export class MarkerOverlay {
       this.camera,
     );
     let selected: { x: number; y: number; marker: Marker } | null = null;
+    const counts: Record<string, number> = {};
 
-    for (const layer of this.layers.values()) {
+    for (const [moduleId, layer] of this.layers) {
+      layer.visible.fill(0);
+      if (this.hidden.has(moduleId)) continue;
+      let inView = 0;
       for (let i = 0; i < layer.placed.length; i++) {
         const { marker, position, scaled } = layer.placed[i];
-        layer.visible[i] = 0;
         if (Cartesian3.dot(scaled, eye) <= 1) continue;
         const screen = SceneTransforms.worldToWindowCoordinates(
           scene,
@@ -192,14 +224,21 @@ export class MarkerOverlay {
           continue;
         }
         layer.visible[i] = 1;
+        inView++;
         layer.x[i] = screen.x;
         layer.y[i] = screen.y;
         if (marker.id === this.selectedId) {
           selected = { x: screen.x, y: screen.y, marker };
         }
       }
+      counts[moduleId] = inView;
       this.drawLayer(ctx, layer, "default");
       this.drawLayer(ctx, layer, "notable");
+    }
+
+    if (!sameCounts(counts, this.counts)) {
+      this.counts = counts;
+      this.report?.(counts);
     }
 
     if (selected)

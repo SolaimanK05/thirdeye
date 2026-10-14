@@ -1,18 +1,23 @@
 "use client";
 
+import { useInView } from "@/state/in-view";
 import { useConsole } from "./console-shell";
 import { formatCentre } from "./geo";
-import type { ConsoleSnapshot } from "./types";
+import { railCounts } from "./status";
+import { useRail } from "./use-rail";
 import { altitudeKm, formatKm, scaleBar, zoomLevelFor } from "./zoom";
 import { ZoomControl } from "./zoom-control";
 
-type Props = Pick<ConsoleSnapshot, "hud">;
-
 const SHEET_CLEARANCE = "bottom-20 lg:bottom-5.5";
 
-export function GlobeHud({ hud }: Props) {
+export function GlobeHud() {
   const { zoomPercent, globeStyle, centre } = useConsole();
   const level = zoomLevelFor(zoomPercent);
+  const { status, domains } = useRail();
+  const inView = useInView((state) =>
+    Object.values(state.counts).reduce((sum, count) => sum + count, 0),
+  );
+  const layers = railCounts(domains, level.level).drawn;
   const scale = scaleBar(zoomPercent);
 
   return (
@@ -27,10 +32,12 @@ export function GlobeHud({ hud }: Props) {
 
       <div className="absolute top-5.5 right-6 z-5 hidden flex-col items-end gap-0.75 text-ink-3 text-label tracking-[0.04em] tabular-nums @min-[640px]:flex">
         <span className="text-ink-2">{globeStyle}</span>
-        <span>
-          {hud.entities} entities, {hud.contacts} contacts
+        <span>{status === "ready" ? `${inView} in view` : "no data"}</span>
+        <span className="hidden xl:inline">
+          {status === "ready"
+            ? `${layers} ${layers === 1 ? "layer" : "layers"}`
+            : ""}
         </span>
-        <span className="hidden xl:inline">{hud.layers} layers</span>
       </div>
 
       <ZoomControl className="-translate-y-1/2 absolute top-1/2 right-3 z-9 lg:right-4.5" />

@@ -4,6 +4,7 @@ from datetime import datetime
 
 import httpx
 
+from thirdeye.config import Settings
 from thirdeye.modules.earthquakes import manifest as earthquakes_manifest
 from thirdeye.modules.earthquakes import records as earthquakes_records
 from thirdeye.modules.earthquakes import source as earthquakes_source
@@ -26,6 +27,12 @@ class Module:
     @property
     def id(self) -> str:
         return self.manifest.id
+
+    def key_missing(self, settings: Settings) -> bool:
+        key_env = self.manifest.key_env
+        return self.manifest.requires_key and (
+            key_env is None or not settings.has_key(key_env)
+        )
 
 
 def build_registry(modules: Iterable[Module]) -> dict[str, Module]:
@@ -59,3 +66,16 @@ def enabled(
             f"known modules are {sorted(registry)}"
         )
     return [registry[m] for m in wanted]
+
+
+def check_default_on(
+    module_ids: Iterable[str], registry: Mapping[str, Module] = REGISTRY
+) -> frozenset[str]:
+    wanted = frozenset(module_ids)
+    unknown = sorted(wanted - registry.keys())
+    if unknown:
+        raise RegistryError(
+            f"MODULES_DEFAULT_ON lists unknown modules {unknown}; "
+            f"known modules are {sorted(registry)}"
+        )
+    return wanted

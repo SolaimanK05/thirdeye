@@ -702,7 +702,7 @@
       },
       "HealthState": {
         "type": "string",
-        "enum": ["fresh", "stale", "failed", "empty", "pending"]
+        "enum": ["fresh", "stale", "failed", "empty", "pending", "missing_key"]
       },
       "JsonValue": {},
       "Layer": {
@@ -774,6 +774,22 @@
             "type": "boolean",
             "title": "Requires Key"
           },
+          "key_env": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Env"
+          },
+          "default_filter": {
+            "type": "string",
+            "enum": ["all", "none"],
+            "title": "Default Filter"
+          },
           "provenance": {
             "$ref": "#/components/schemas/ProvenanceOut"
           },
@@ -790,6 +806,8 @@
           "cadence_seconds",
           "zoom_range",
           "requires_key",
+          "key_env",
+          "default_filter",
           "provenance",
           "health"
         ],

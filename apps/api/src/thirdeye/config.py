@@ -1,7 +1,13 @@
 from functools import lru_cache
 from typing import Literal, NamedTuple, Self
 
-from pydantic import Field, PostgresDsn, field_validator, model_validator
+from pydantic import (
+    Field,
+    PostgresDsn,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,7 +30,14 @@ class Settings(BaseSettings):
     public_instance: bool = False
     region_bbox: BBox = BBox(west=78.0, south=5.0, east=100.0, north=24.0)
     modules_enabled: list[str] = []
+    modules_default_on: list[str] | None = None
+    firms_map_key: SecretStr | None = None
+    aisstream_api_key: SecretStr | None = None
     cors_origins: list[str] = ["http://localhost:3000"]
+
+    def has_key(self, key_env: str) -> bool:
+        value = getattr(self, key_env.lower(), None)
+        return isinstance(value, SecretStr) and bool(value.get_secret_value().strip())
 
     @field_validator("log_level", mode="before")
     @classmethod

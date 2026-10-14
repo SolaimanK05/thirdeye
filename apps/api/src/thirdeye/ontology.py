@@ -159,10 +159,21 @@ class ModuleManifest(Model):
     cadence_seconds: Annotated[int, Field(ge=0)]
     zoom_range: tuple[ZoomLevel, ZoomLevel] | None
     requires_key: bool
+    key_env: Annotated[str, StringConstraints(pattern=r"^[A-Z][A-Z0-9_]*$")] | None = (
+        None
+    )
     provenance: Provenance
 
     @model_validator(mode="after")
     def check_zoom(self) -> Self:
         if self.zoom_range is not None and self.zoom_range[0] > self.zoom_range[1]:
             raise ValueError(f"zoom_range {self.zoom_range} must be (min, max)")
+        return self
+
+    @model_validator(mode="after")
+    def check_key(self) -> Self:
+        if self.requires_key and self.key_env is None:
+            raise ValueError("a module that requires a key must name its key_env")
+        if not self.requires_key and self.key_env is not None:
+            raise ValueError("key_env is only for modules that require a key")
         return self

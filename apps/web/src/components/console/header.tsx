@@ -8,11 +8,11 @@ import { ModulesDrawer } from "./modules-drawer";
 import { SearchField } from "./search-field";
 import type { ConsoleSnapshot } from "./types";
 
-type Props = Pick<ConsoleSnapshot, "instance" | "sampleData" | "alerts"> & {
+type Props = Pick<ConsoleSnapshot, "instance" | "alerts"> & {
   menu: ReactNode;
 };
 
-export function Header({ instance, sampleData, alerts, menu }: Props) {
+export function Header({ instance, alerts, menu }: Props) {
   return (
     <header className="relative z-30 flex min-h-13 items-center gap-x-1 border-line border-b bg-ground px-1 py-1 [grid-area:header] lg:gap-x-4.5 lg:px-4">
       <ModulesDrawer>{menu}</ModulesDrawer>
@@ -25,11 +25,6 @@ export function Header({ instance, sampleData, alerts, menu }: Props) {
         <span className="hidden border-line border-l pl-2.5 text-ink-3 text-micro uppercase xl:inline">
           {instance}
         </span>
-        {sampleData && (
-          <span className="hidden border border-amber px-1.5 py-0.5 text-amber text-micro leading-none lg:inline">
-            SAMPLE
-          </span>
-        )}
       </div>
 
       <search className="hidden min-w-0 lg:block lg:max-w-155 lg:flex-[1_1_240px] xl:flex-[1_1_320px]">

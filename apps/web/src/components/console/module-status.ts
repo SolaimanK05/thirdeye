@@ -8,6 +8,7 @@ export const HEALTH_FROM_API: Record<HealthState, Health> = {
   failed: "failed",
   empty: "empty",
   pending: "empty",
+  missing_key: "missing-key",
 };
 
 export function attributionLine(modules: readonly ModuleInfo[]): string | null {
@@ -36,6 +37,8 @@ function statusText(module: ModuleInfo): string {
       return `${name} empty ${at ?? ""}`.trim();
     case "fresh":
       return `${name} ${at ?? ""}`.trim();
+    case "missing_key":
+      return `${name} needs ${module.key_env ?? "an API key"}`;
   }
 }
 

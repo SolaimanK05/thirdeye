@@ -60,6 +60,11 @@ export function isOn(row: ModuleRow): boolean {
   return row.health !== "missing-key" && row.filter !== "none";
 }
 
+export function drawsAnything(row: ModuleRow): boolean {
+  if (!isOn(row)) return false;
+  return row.filter === "all" || row.starredCount > 0;
+}
+
 export function inRange(row: ModuleRow, zoom: ZoomLevel): boolean {
   return (
     row.zoomRange !== null &&
@@ -93,6 +98,9 @@ export function moduleNote(row: ModuleRow, zoom: ZoomLevel): ModuleNote {
   if (row.filter === "none") {
     return { text: "off", tone: "ink-3" };
   }
+  if (row.filter === "starred" && row.starredCount === 0) {
+    return { text: "nothing starred", tone: "ink-3" };
+  }
   if (row.zoomRange === null) {
     return { text: "no map layer", tone: "ink-3" };
   }
@@ -104,7 +112,7 @@ export function moduleNote(row: ModuleRow, zoom: ZoomLevel): ModuleNote {
   }
   if (row.health === "stale") {
     return {
-      text: `cooldown, last ${row.lastGood ?? "unknown"}`,
+      text: `last good ${row.lastGood ?? "unknown"}`,
       tone: "amber",
     };
   }
@@ -132,6 +140,6 @@ export function railCounts(
   const modules = domains.flatMap((d) => d.modules).filter(isOn);
   return {
     on: modules.length,
-    drawn: modules.filter((m) => inRange(m, zoom)).length,
+    drawn: modules.filter((m) => drawsAnything(m) && inRange(m, zoom)).length,
   };
 }

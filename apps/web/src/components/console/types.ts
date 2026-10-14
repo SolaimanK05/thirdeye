@@ -16,6 +16,8 @@ export type ModuleRow = {
   health: Health;
   zoomRange: readonly [ZoomLevel, ZoomLevel] | null;
   filter: Filter;
+  loaded: number;
+  starredCount: number;
   inView?: number;
   missingKey?: string;
   failure?: string;
@@ -66,12 +68,8 @@ export type StatusLine = {
 
 export type ConsoleSnapshot = {
   instance: string;
-  sampleData: boolean;
   zoomPercent: number;
   centre: LatLon;
   globeStyle: GlobeStyle;
-  hud: { entities: number; contacts: number; layers: number };
-  domains: readonly DomainGroup[];
-  starred: readonly StarredEntity[];
   alerts: { count: number; latest: string | null };
 };

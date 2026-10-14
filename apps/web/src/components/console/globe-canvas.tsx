@@ -19,6 +19,7 @@ import {
 } from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useInView } from "@/state/in-view";
 import { useSelection } from "@/state/selection";
 import { useConsole } from "./console-shell";
 import { GLOBE_CREDITS_ID } from "./globe-config";
@@ -211,13 +212,18 @@ export default function GlobeCanvas() {
     globe.current = current;
     applyStyle(current, start.globeStyle, start.zoomPercent);
 
-    const markers = new MarkerOverlay(widget, markerElement, {
-      default: cssValue("--color-ink-2"),
-      notable: cssValue("--color-amber"),
-      accent: cssValue("--color-accent"),
-      plate: cssValue("--color-panel"),
-      font: getComputedStyle(document.body).fontFamily,
-    });
+    const markers = new MarkerOverlay(
+      widget,
+      markerElement,
+      {
+        default: cssValue("--color-ink-2"),
+        notable: cssValue("--color-amber"),
+        accent: cssValue("--color-accent"),
+        plate: cssValue("--color-panel"),
+        font: getComputedStyle(document.body).fontFamily,
+      },
+      (counts) => useInView.getState().setCounts(counts),
+    );
     const stopPointer = watchPointer(widget, markers);
     setOverlay(markers);
 

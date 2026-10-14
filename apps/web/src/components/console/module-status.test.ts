@@ -1,41 +1,6 @@
 import { describe, expect, test } from "vitest";
-import type { ModuleInfo } from "@/api/client";
+import { moduleInfo } from "@/api/test-data";
 import { attributionLine, moduleStatusLines } from "./module-status";
-
-function moduleInfo(
-  id: string,
-  attribution: string,
-  overrides: Partial<ModuleInfo> = {},
-  health: Partial<ModuleInfo["health"]> = {},
-): ModuleInfo {
-  return {
-    id,
-    name: id,
-    domain: "earth",
-    enabled: true,
-    cadence_seconds: 60,
-    zoom_range: { min: 1, max: 4 },
-    requires_key: false,
-    provenance: {
-      source_id: id,
-      source: id,
-      licence: "open",
-      attribution,
-      freshness: "1 min",
-      confidence: "observed",
-      limitations: ["a", "b"],
-    },
-    health: {
-      state: "fresh",
-      fetched_at: "2026-10-14T05:59:12Z",
-      record_count: 10,
-      reason: null,
-      stale_after_seconds: 180,
-      ...health,
-    },
-    ...overrides,
-  };
-}
 
 describe("attribution", () => {
   test("lists enabled modules once each, with commas", () => {
@@ -70,6 +35,12 @@ describe("module status lines", () => {
             {},
             { state: "pending", fetched_at: null },
           ),
+          moduleInfo(
+            "wildfires",
+            "FIRMS",
+            { requires_key: true, key_env: "FIRMS_MAP_KEY" },
+            { state: "missing_key", fetched_at: null },
+          ),
           moduleInfo("off", "Off", { enabled: false }),
         ],
         false,
@@ -79,6 +50,7 @@ describe("module status lines", () => {
       { health: "stale", text: "aircraft stale, last 05:59:12Z" },
       { health: "failed", text: "ports failed 05:59:12Z" },
       { health: "empty", text: "fires waiting for first fetch" },
+      { health: "missing-key", text: "wildfires needs FIRMS_MAP_KEY" },
     ]);
   });
 

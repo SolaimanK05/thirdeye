@@ -5,9 +5,7 @@ import { ModuleStatusLines } from "./module-status-lines";
 import { CollapsedStrip, SidebarBody } from "./sidebar-toggle";
 import type { ConsoleSnapshot } from "./types";
 
-type Props = Pick<ConsoleSnapshot, "domains" | "starred">;
-
-export function ModuleRail({ domains, starred }: Props) {
+export function ModuleRail() {
   return (
     <nav
       aria-label="Modules"
@@ -15,34 +13,19 @@ export function ModuleRail({ domains, starred }: Props) {
     >
       <CollapsedStrip side="left" label="Modules" />
       <SidebarBody side="left" id="modules-rail" label="Modules">
-        <ModuleList domains={domains} starred={starred} />
+        <ModuleList />
       </SidebarBody>
     </nav>
   );
 }
 
-type MenuProps = Pick<
-  ConsoleSnapshot,
-  "domains" | "starred" | "instance" | "sampleData"
->;
+type MenuProps = Pick<ConsoleSnapshot, "instance">;
 
-export function MobileMenu({
-  domains,
-  starred,
-  instance,
-  sampleData,
-}: MenuProps) {
+export function MobileMenu({ instance }: MenuProps) {
   return (
     <>
       <div className="flex items-center justify-between gap-3 border-line border-b px-3 py-3">
-        <div className="flex flex-col gap-1.5">
-          <span className="text-ink-3 text-micro uppercase">{instance}</span>
-          {sampleData && (
-            <span className="self-start border border-amber px-1.5 py-0.5 text-amber text-micro leading-none">
-              SAMPLE
-            </span>
-          )}
-        </div>
+        <span className="text-ink-3 text-micro uppercase">{instance}</span>
         <Clock />
       </div>
       <div className="flex items-center justify-between gap-3 border-line border-b px-3 py-2.5">
@@ -50,7 +33,7 @@ export function MobileMenu({
         <GlobeStyleMenu />
       </div>
       <nav aria-label="Modules">
-        <ModuleList domains={domains} starred={starred} />
+        <ModuleList />
       </nav>
       <ModuleStatusLines className="border-line border-t px-3 py-3" />
     </>

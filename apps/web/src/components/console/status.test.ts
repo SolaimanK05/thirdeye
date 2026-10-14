@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { SAMPLE } from "./sample";
-import { everyModuleFilter, moduleNote, railCounts, rangeNote } from "./status";
+import {
+  drawsAnything,
+  everyModuleFilter,
+  moduleNote,
+  railCounts,
+  rangeNote,
+} from "./status";
 import type { DomainGroup, ModuleRow } from "./types";
 
 const quakes: ModuleRow = {
@@ -9,7 +14,35 @@ const quakes: ModuleRow = {
   health: "fresh",
   zoomRange: [1, 4],
   filter: "all",
+  loaded: 10,
+  starredCount: 0,
 };
+
+const row = (id: string, changes: Partial<ModuleRow> = {}): ModuleRow => ({
+  ...quakes,
+  id,
+  name: id,
+  ...changes,
+});
+
+const SAMPLE_DOMAINS: DomainGroup[] = [
+  {
+    label: "EARTH",
+    modules: [
+      row("earthquakes"),
+      row("wildfires", { health: "missing-key", zoomRange: [2, 4] }),
+    ],
+  },
+  {
+    label: "MOVERS",
+    modules: [
+      row("vessels", { zoomRange: [2, 4] }),
+      row("aircraft", { zoomRange: [2, 4], health: "stale" }),
+      row("satellites", { zoomRange: [1, 2] }),
+    ],
+  },
+  { label: "INFRASTRUCTURE", modules: [row("ports", { zoomRange: [2, 4] })] },
+];
 
 describe("moduleNote follows the SCREENS priority order", () => {
   test("missing key wins over everything", () => {
@@ -41,6 +74,16 @@ describe("moduleNote follows the SCREENS priority order", () => {
     expect(moduleNote({ ...quakes, filter: "none" }, 2).text).toBe("off");
   });
 
+  test("Starred with nothing starred says so", () => {
+    expect(moduleNote({ ...quakes, filter: "starred" }, 2)).toEqual({
+      text: "nothing starred",
+      tone: "ink-3",
+    });
+    expect(
+      moduleNote({ ...quakes, filter: "starred", starredCount: 2 }, 2).text,
+    ).toBe("auto, any zoom");
+  });
+
   test("outside its zoom range it says hidden, with the count in view", () => {
     const row: ModuleRow = { ...quakes, zoomRange: [3, 4], inView: 3 };
     expect(moduleNote(row, 2)).toEqual({
@@ -53,7 +96,7 @@ describe("moduleNote follows the SCREENS priority order", () => {
   test("stale shows the last good time in amber", () => {
     const row: ModuleRow = { ...quakes, health: "stale", lastGood: "11:21Z" };
     expect(moduleNote(row, 2)).toEqual({
-      text: "cooldown, last 11:21Z",
+      text: "last good 11:21Z",
       tone: "amber",
     });
   });
@@ -93,9 +136,39 @@ describe("rail summary", () => {
   });
 
   test("counts modules on and drawn at the current zoom", () => {
-    expect(railCounts(SAMPLE.domains, 2)).toEqual({ on: 5, drawn: 5 });
-    expect(railCounts(SAMPLE.domains, 4)).toEqual({ on: 5, drawn: 4 });
-    expect(railCounts(SAMPLE.domains, 1)).toEqual({ on: 5, drawn: 2 });
+    expect(railCounts(SAMPLE_DOMAINS, 2)).toEqual({ on: 5, drawn: 5 });
+    expect(railCounts(SAMPLE_DOMAINS, 4)).toEqual({ on: 5, drawn: 4 });
+    expect(railCounts(SAMPLE_DOMAINS, 1)).toEqual({ on: 5, drawn: 2 });
+  });
+
+  test("a module set to None is neither on nor drawn", () => {
+    const domains = [
+      { label: "EARTH", modules: [quakes, row("b", { filter: "none" })] },
+    ];
+    expect(railCounts(domains, 2)).toEqual({ on: 1, drawn: 1 });
+  });
+
+  test("Starred only counts as drawn once something is starred", () => {
+    const starred = (count: number) => [
+      {
+        label: "EARTH",
+        modules: [row("b", { filter: "starred", starredCount: count })],
+      },
+    ];
+    expect(railCounts(starred(0), 2)).toEqual({ on: 1, drawn: 0 });
+    expect(railCounts(starred(3), 2)).toEqual({ on: 1, drawn: 1 });
+  });
+});
+
+describe("drawsAnything", () => {
+  test("only All, or Starred with something starred, draws", () => {
+    expect(drawsAnything(quakes)).toBe(true);
+    expect(drawsAnything({ ...quakes, filter: "none" })).toBe(false);
+    expect(drawsAnything({ ...quakes, filter: "starred" })).toBe(false);
+    expect(
+      drawsAnything({ ...quakes, filter: "starred", starredCount: 1 }),
+    ).toBe(true);
+    expect(drawsAnything({ ...quakes, health: "missing-key" })).toBe(false);
   });
 });
 

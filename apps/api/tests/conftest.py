@@ -1,5 +1,5 @@
 import os
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -17,6 +17,7 @@ from thirdeye.db import get_pool
 from thirdeye.deps import get_layer_cache, get_reader
 from thirdeye.layers import LayerCache
 from thirdeye.reads import EntityRecord, EventRecord, HealthRecord, SnapshotRecord
+from thirdeye.registry import Module
 
 NOW = datetime(2026, 10, 14, 6, 0, tzinfo=UTC)
 
@@ -89,6 +90,21 @@ def make_client(settings: Settings, reader: FakeReader) -> Callable[[bool], Test
         reader.healthy = db_healthy
         cache = LayerCache(reader.snapshot)
         app.dependency_overrides[get_pool] = lambda: FakePool(db_healthy)
+        app.dependency_overrides[get_reader] = lambda: reader
+        app.dependency_overrides[get_layer_cache] = lambda: cache
+        return TestClient(app)
+
+    return factory
+
+
+@pytest.fixture
+def make_registry_client(
+    reader: FakeReader,
+) -> Callable[[Settings, Mapping[str, Module]], TestClient]:
+    def factory(settings: Settings, registry: Mapping[str, Module]) -> TestClient:
+        app = create_app(settings, registry)
+        cache = LayerCache(reader.snapshot)
+        app.dependency_overrides[get_pool] = lambda: FakePool(True)
         app.dependency_overrides[get_reader] = lambda: reader
         app.dependency_overrides[get_layer_cache] = lambda: cache
         return TestClient(app)
