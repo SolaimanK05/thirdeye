@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any, cast
 from uuid import UUID
 
 import psycopg_pool
@@ -11,13 +12,21 @@ from fastapi.testclient import TestClient
 
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@127.0.0.1:1/test")
 
+from thirdeye import store
 from thirdeye.app import create_app
 from thirdeye.config import Settings
-from thirdeye.db import get_pool
+from thirdeye.db import Pool, get_pool
 from thirdeye.deps import get_layer_cache, get_reader
-from thirdeye.layers import LayerCache
-from thirdeye.reads import EntityRecord, EventRecord, HealthRecord, SnapshotRecord
-from thirdeye.registry import Module
+from thirdeye.layers import LayerCache, ViewLoader
+from thirdeye.reads import (
+    EntityRecord,
+    EventRecord,
+    HealthRecord,
+    SnapshotRecord,
+    Viewport,
+    ViewRecord,
+)
+from thirdeye.registry import REGISTRY, Module
 
 NOW = datetime(2026, 10, 14, 6, 0, tzinfo=UTC)
 
@@ -46,6 +55,9 @@ class FakeReader:
     entities: dict[UUID, EntityRecord] = field(default_factory=dict)
     healthy: bool = True
     snapshot_calls: int = 0
+    view_rows: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    view_fetched_at: dict[str, datetime] = field(default_factory=dict)
+    window_calls: list[tuple[str, int, Viewport]] = field(default_factory=list)
 
     def check(self) -> None:
         if not self.healthy:
@@ -55,6 +67,29 @@ class FakeReader:
         self.check()
         self.snapshot_calls += 1
         return self.snapshots.get(module_id)
+
+    async def window(
+        self, module_id: str, lookback_seconds: int, viewport: Viewport
+    ) -> ViewRecord | None:
+        self.check()
+        self.window_calls.append((module_id, lookback_seconds, viewport))
+        fetched_at = self.view_fetched_at.get(module_id)
+        if fetched_at is None:
+            return None
+        inside = [
+            row
+            for row in self.view_rows.get(module_id, [])
+            if viewport.south <= row["lat"] <= viewport.north
+            and (
+                (viewport.west <= row["lon"] <= viewport.east)
+                if not viewport.wraps
+                else (row["lon"] >= viewport.west or row["lon"] <= viewport.east)
+            )
+        ]
+        inside.sort(key=lambda row: -(row["severity"] or 0))
+        return ViewRecord(
+            rows=inside[: viewport.limit], matched=len(inside), fetched_at=fetched_at
+        )
 
     async def health(self) -> dict[str, HealthRecord]:
         self.check()
@@ -67,6 +102,14 @@ class FakeReader:
     async def entity(self, entity_id: UUID) -> EntityRecord | None:
         self.check()
         return self.entities.get(entity_id)
+
+
+def view_loader_for(reader: FakeReader, registry: Mapping[str, Module]) -> ViewLoader:
+    async def load(module_id: str, viewport: Viewport) -> ViewRecord | None:
+        lookback = registry[module_id].manifest.viewport_lookback_seconds or 0
+        return await reader.window(module_id, lookback, viewport)
+
+    return load
 
 
 @pytest.fixture
@@ -88,7 +131,7 @@ def make_client(settings: Settings, reader: FakeReader) -> Callable[[bool], Test
     def factory(db_healthy: bool = True) -> TestClient:
         app = create_app(settings)
         reader.healthy = db_healthy
-        cache = LayerCache(reader.snapshot)
+        cache = LayerCache(reader.snapshot, view_loader_for(reader, REGISTRY))
         app.dependency_overrides[get_pool] = lambda: FakePool(db_healthy)
         app.dependency_overrides[get_reader] = lambda: reader
         app.dependency_overrides[get_layer_cache] = lambda: cache
@@ -103,10 +146,59 @@ def make_registry_client(
 ) -> Callable[[Settings, Mapping[str, Module]], TestClient]:
     def factory(settings: Settings, registry: Mapping[str, Module]) -> TestClient:
         app = create_app(settings, registry)
-        cache = LayerCache(reader.snapshot)
+        cache = LayerCache(reader.snapshot, view_loader_for(reader, registry))
         app.dependency_overrides[get_pool] = lambda: FakePool(True)
         app.dependency_overrides[get_reader] = lambda: reader
         app.dependency_overrides[get_layer_cache] = lambda: cache
         return TestClient(app)
 
     return factory
+
+
+class WorkerPool:
+    @asynccontextmanager
+    async def connection(self) -> AsyncIterator[object]:
+        yield object()
+
+
+POOL = cast(Pool, WorkerPool())
+
+
+class Recorder:
+    def __init__(self) -> None:
+        self.writes: list[tuple[str, int]] = []
+        self.snapshot_rows: dict[str, bool] = {}
+        self.failures: list[tuple[str, str]] = []
+        self.prunes: list[tuple[str, int]] = []
+
+    async def prune_events(
+        self, conn: object, module_id: str, keep_seconds: int, now: datetime
+    ) -> int:
+        self.prunes.append((module_id, keep_seconds))
+        return 0
+
+    async def write_events(
+        self,
+        conn: object,
+        module_id: str,
+        events: list[Any],
+        fetched_at: datetime,
+        *,
+        snapshot_rows: bool = True,
+    ) -> None:
+        self.writes.append((module_id, len(events)))
+        self.snapshot_rows[module_id] = snapshot_rows
+
+    async def record_failure(
+        self, conn: object, module_id: str, reason: str, failed_at: datetime
+    ) -> None:
+        self.failures.append((module_id, reason))
+
+
+@pytest.fixture
+def recorder(monkeypatch: pytest.MonkeyPatch) -> Recorder:
+    rec = Recorder()
+    monkeypatch.setattr(store, "write_events", rec.write_events)
+    monkeypatch.setattr(store, "record_failure", rec.record_failure)
+    monkeypatch.setattr(store, "prune_events", rec.prune_events)
+    return rec

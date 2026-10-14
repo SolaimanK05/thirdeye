@@ -267,6 +267,10 @@ export interface components {
       fetched_at: string | null;
       /** Record Count */
       record_count: number;
+      /** Matched */
+      matched: number;
+      /** Truncated */
+      truncated: boolean;
       /** Rows */
       rows: components["schemas"]["EventRow"][];
     };
@@ -291,6 +295,8 @@ export interface components {
        * @enum {string}
        */
       default_filter: "all" | "none";
+      /** Viewport */
+      viewport: boolean;
       provenance: components["schemas"]["ProvenanceOut"];
       health: components["schemas"]["HealthOut"];
     };
@@ -460,7 +466,16 @@ export interface operations {
   };
   get_layer_v1_layers__module_id__get: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description west,south,east,north; west above east crosses 180 */
+        bbox?: string | null;
+        /** @description Strongest rows first */
+        limit?: number | null;
+        /** @description Merge rows inside grid cells this many degrees wide */
+        cell?: number | null;
+        /** @description Drop rows, or merged cells, with less total severity */
+        min_severity?: number | null;
+      };
       header?: {
         "if-none-match"?: string | null;
         "if-modified-since"?: string | null;

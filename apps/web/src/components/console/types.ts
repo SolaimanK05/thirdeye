@@ -19,6 +19,7 @@ export type ModuleRow = {
   loaded: number;
   starredCount: number;
   inView?: number;
+  capped?: { shown: number; matched: number };
   missingKey?: string;
   failure?: string;
   lastGood?: string;

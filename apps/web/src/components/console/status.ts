@@ -1,3 +1,4 @@
+import { formatCount } from "./count";
 import type {
   ConfidenceTag,
   DomainGroup,
@@ -114,6 +115,12 @@ export function moduleNote(row: ModuleRow, zoom: ZoomLevel): ModuleNote {
     return {
       text: `last good ${row.lastGood ?? "unknown"}`,
       tone: "amber",
+    };
+  }
+  if (row.capped) {
+    return {
+      text: `top ${formatCount(row.capped.shown)} of ${formatCount(row.capped.matched)}`,
+      tone: "ink-2",
     };
   }
   return { text: rangeNote(row.zoomRange), tone: "ink-3" };

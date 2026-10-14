@@ -16,6 +16,8 @@ def configure_logging(settings: Settings) -> None:
     else:
         renderer = structlog.dev.ConsoleRenderer()
         exceptions = []
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,

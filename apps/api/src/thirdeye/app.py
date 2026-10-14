@@ -7,24 +7,44 @@ import psycopg
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from thirdeye.config import Settings, get_settings
 from thirdeye.db import SESSION_OPTIONS, Pool, create_pool
 from thirdeye.errors import register_error_handlers
-from thirdeye.layers import Connect, LayerCache, Loader, listen_for_layers
+from thirdeye.layers import (
+    Connect,
+    LayerCache,
+    Loader,
+    ViewLoader,
+    listen_for_layers,
+)
 from thirdeye.logs import configure_logging
-from thirdeye.reads import DbReader, SnapshotRecord
+from thirdeye.reads import DbReader, SnapshotRecord, Viewport, ViewRecord
 from thirdeye.registry import REGISTRY, Module, check_default_on, enabled
 from thirdeye.routes import v1
 from thirdeye.routes.health import APP_VERSION
 
 log = structlog.get_logger()
 
+GZIP_MINIMUM_BYTES = 1024
+
 
 def snapshot_loader(pool: Pool) -> Loader:
     async def load(module_id: str) -> SnapshotRecord | None:
         async with pool.connection() as conn:
             return await DbReader(conn).snapshot(module_id)
+
+    return load
+
+
+def view_loader(pool: Pool, registry: Mapping[str, Module]) -> ViewLoader:
+    async def load(module_id: str, viewport: Viewport) -> ViewRecord | None:
+        lookback = registry[module_id].manifest.viewport_lookback_seconds
+        if lookback is None:
+            raise ValueError(f"module {module_id!r} has no viewport lookback")
+        async with pool.connection() as conn:
+            return await DbReader(conn).window(module_id, lookback, viewport)
 
     return load
 
@@ -50,7 +70,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = app.state.settings
     pool = create_pool(settings)
     await pool.open()
-    cache = LayerCache(snapshot_loader(pool))
+    cache = LayerCache(snapshot_loader(pool), view_loader(pool, app.state.registry))
     app.state.pool = pool
     app.state.layer_cache = cache
     listener = asyncio.create_task(
@@ -93,6 +113,7 @@ def create_app(
         allow_headers=["Content-Type"],
         expose_headers=["ETag", "Last-Modified"],
     )
+    app.add_middleware(GZipMiddleware, minimum_size=GZIP_MINIMUM_BYTES)
     register_error_handlers(app)
     app.include_router(v1)
     return app

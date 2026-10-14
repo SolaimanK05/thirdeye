@@ -163,6 +163,21 @@ class ModuleManifest(Model):
         None
     )
     provenance: Provenance
+    viewport_lookback_seconds: Annotated[int, Field(gt=0)] | None = None
+    retention_seconds: Annotated[int, Field(gt=0)] | None = None
+
+    @model_validator(mode="after")
+    def check_retention(self) -> Self:
+        if (
+            self.retention_seconds is not None
+            and self.viewport_lookback_seconds is not None
+            and self.retention_seconds < self.viewport_lookback_seconds
+        ):
+            raise ValueError(
+                "retention_seconds must cover viewport_lookback_seconds, "
+                "or the map would ask for rows that were already deleted"
+            )
+        return self
 
     @model_validator(mode="after")
     def check_zoom(self) -> Self:

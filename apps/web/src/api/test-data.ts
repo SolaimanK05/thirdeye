@@ -16,6 +16,7 @@ export function moduleInfo(
     requires_key: false,
     key_env: null,
     default_filter: "all",
+    viewport: false,
     provenance: {
       source_id: id,
       source: id,

@@ -32,12 +32,23 @@ class Settings(BaseSettings):
     modules_enabled: list[str] = []
     modules_default_on: list[str] | None = None
     firms_map_key: SecretStr | None = None
+    firms_min_confidence: Literal["low", "nominal", "high"] = "high"
+    firms_min_frp_mw: float = Field(default=0.0, ge=0, allow_inf_nan=False)
     aisstream_api_key: SecretStr | None = None
     cors_origins: list[str] = ["http://localhost:3000"]
 
     def has_key(self, key_env: str) -> bool:
         value = getattr(self, key_env.lower(), None)
         return isinstance(value, SecretStr) and bool(value.get_secret_value().strip())
+
+    def secret_values(self) -> list[str]:
+        secrets = (self.firms_map_key, self.aisstream_api_key)
+        return [
+            value
+            for secret in secrets
+            if secret is not None
+            if (value := secret.get_secret_value().strip())
+        ]
 
     @field_validator("log_level", mode="before")
     @classmethod

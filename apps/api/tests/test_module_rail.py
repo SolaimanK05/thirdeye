@@ -54,7 +54,7 @@ class TestRegistryEndpoint:
     def test_an_injected_module_is_listed_without_other_changes(
         self, make_registry_client: MakeRegistryClient
     ) -> None:
-        registry = build_registry([*REGISTRY.values(), fake_module("fakequake")])
+        registry = build_registry([REGISTRY["earthquakes"], fake_module("fakequake")])
         settings = settings_for(modules_enabled=["earthquakes", "fakequake"])
         body = listing(make_registry_client(settings, registry))
         assert [m["id"] for m in body] == ["earthquakes", "fakequake"]
@@ -87,7 +87,7 @@ class TestRegistryEndpoint:
     def test_unlisted_modules_are_not_enabled(
         self, make_registry_client: MakeRegistryClient
     ) -> None:
-        registry = build_registry([*REGISTRY.values(), fake_module("fakequake")])
+        registry = build_registry([REGISTRY["earthquakes"], fake_module("fakequake")])
         body = listing(
             make_registry_client(
                 settings_for(modules_enabled=["earthquakes"]), registry
@@ -156,7 +156,7 @@ class TestDefaultFilter:
     def test_every_enabled_module_starts_on_by_default(
         self, make_registry_client: MakeRegistryClient
     ) -> None:
-        registry = build_registry([*REGISTRY.values(), fake_module("fakequake")])
+        registry = build_registry([REGISTRY["earthquakes"], fake_module("fakequake")])
         settings = settings_for(modules_enabled=["earthquakes", "fakequake"])
         body = listing(make_registry_client(settings, registry))
         assert [m["default_filter"] for m in body] == ["all", "all"]
@@ -164,7 +164,7 @@ class TestDefaultFilter:
     def test_default_on_limits_which_modules_start_on(
         self, make_registry_client: MakeRegistryClient
     ) -> None:
-        registry = build_registry([*REGISTRY.values(), fake_module("fakequake")])
+        registry = build_registry([REGISTRY["earthquakes"], fake_module("fakequake")])
         settings = settings_for(
             modules_enabled=["earthquakes", "fakequake"],
             modules_default_on=["earthquakes"],

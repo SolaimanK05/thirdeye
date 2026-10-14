@@ -5,10 +5,13 @@ import type { ModuleInfo } from "@/api/client";
 import { useLayer, useModules } from "@/api/queries";
 import { MODULE_VIEWS } from "@/modules/registry";
 import { useFilters } from "@/state/filters";
+import { useLayerCaps } from "@/state/layer-caps";
 import { useSelection } from "@/state/selection";
+import { useViewport } from "@/state/viewport";
 import { useConsole } from "./console-shell";
 import type { MarkerOverlay } from "./marker-overlay";
 import { effectiveFilter } from "./rail";
+import { boxParam, clusterFor, queryBox } from "./viewport";
 import { zoomLevelFor } from "./zoom";
 
 type Props = { overlay: MarkerOverlay };
@@ -30,7 +33,21 @@ function ModuleMarkers({
   module: ModuleInfo;
   overlay: MarkerOverlay;
 }) {
-  const { data } = useLayer(module.id, module.cadence_seconds);
+  const view = useViewport((state) => state.box);
+  const box = module.viewport ? queryBox(view) : null;
+  const clustering = box === null ? null : clusterFor(box);
+  const { data } = useLayer(
+    module.id,
+    module.cadence_seconds,
+    box === null
+      ? null
+      : {
+          bbox: boxParam(box),
+          cell: clustering?.cell ?? null,
+          minSeverity: clustering?.minSeverity ?? 0,
+        },
+  );
+  const setCap = useLayerCaps((state) => state.setCap);
   const { zoomPercent } = useConsole();
   const filter = useFilters((state) => effectiveFilter(state.filters, module));
   const selectedModule = useSelection((state) => state.selected?.moduleId);
@@ -50,6 +67,18 @@ function ModuleMarkers({
     }
     overlay.setLayer(module.id, view.markers(data.rows), stale);
   }, [overlay, module.id, data, stale]);
+
+  const shown = data?.record_count;
+  const matched = data?.matched;
+  const capped = data?.truncated === true;
+  useEffect(() => {
+    if (capped && shown !== undefined && matched !== undefined) {
+      setCap(module.id, { shown, matched });
+    } else {
+      setCap(module.id, null);
+    }
+    return () => setCap(module.id, null);
+  }, [module.id, capped, shown, matched, setCap]);
 
   useEffect(() => {
     overlay.setVisible(module.id, drawing && inRange);

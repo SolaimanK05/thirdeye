@@ -1,7 +1,13 @@
 import { create } from "zustand";
+import type { ClusterInfo } from "@/components/console/markers";
 import type { LatLon } from "@/components/console/types";
 
-export type SelectedItem = { kind: "event"; id: string; moduleId: string };
+export type SelectedItem = {
+  kind: "event";
+  id: string;
+  moduleId: string;
+  cluster?: ClusterInfo;
+};
 
 type SelectionState = {
   selected: SelectedItem | null;

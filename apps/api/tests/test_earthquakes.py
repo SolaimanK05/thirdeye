@@ -7,6 +7,7 @@ import httpx
 import pytest
 import respx
 
+from thirdeye.config import Settings
 from thirdeye.modules.earthquakes import source
 from thirdeye.modules.earthquakes.manifest import MANIFEST
 from thirdeye.modules.earthquakes.records import normalize
@@ -16,6 +17,7 @@ FIXTURE = (
     Path(__file__).parents[1] / "src/thirdeye/modules/earthquakes/fixture.json"
 ).read_bytes()
 RETRIEVED_AT = datetime(2026, 10, 12, 20, 0, tzinfo=UTC)
+SETTINGS = Settings(database_url="postgresql://t:t@127.0.0.1:1/t", _env_file=None)
 
 
 def feed(*features: dict[str, Any]) -> bytes:
@@ -90,7 +92,7 @@ def test_broken_feed_raises() -> None:
 async def test_fetch_returns_body() -> None:
     respx.get(source.URL).mock(return_value=httpx.Response(200, content=FIXTURE))
     async with httpx.AsyncClient() as client:
-        assert await source.fetch(client) == FIXTURE
+        assert await source.fetch(client, SETTINGS) == FIXTURE
 
 
 @respx.mock
@@ -98,4 +100,4 @@ async def test_fetch_raises_on_http_error() -> None:
     respx.get(source.URL).mock(return_value=httpx.Response(503))
     async with httpx.AsyncClient() as client:
         with pytest.raises(httpx.HTTPStatusError):
-            await source.fetch(client)
+            await source.fetch(client, SETTINGS)

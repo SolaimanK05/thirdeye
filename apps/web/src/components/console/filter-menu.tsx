@@ -4,6 +4,7 @@ import { Menu } from "@base-ui/react/menu";
 import { ChevronDown, Star } from "lucide-react";
 import type { Ref } from "react";
 import { isFilter } from "@/state/filters";
+import { formatCount } from "./count";
 import { cx } from "./cx";
 import { FILTER_LABEL } from "./status";
 import type { Filter } from "./types";
@@ -105,7 +106,9 @@ export function FilterMenu({
                     </span>
                   </span>
                   <span className="text-ink-3 tabular-nums">
-                    {choice.count ?? ""}
+                    {choice.count === undefined
+                      ? ""
+                      : formatCount(choice.count)}
                   </span>
                 </Menu.RadioItem>
               ))}

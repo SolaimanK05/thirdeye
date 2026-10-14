@@ -39,6 +39,7 @@ class ModuleOut(Out):
     requires_key: bool
     key_env: str | None
     default_filter: Literal["all", "none"]
+    viewport: bool
     provenance: ProvenanceOut
     health: HealthOut
 
@@ -120,6 +121,7 @@ async def list_modules(
                 requires_key=manifest.requires_key,
                 key_env=manifest.key_env,
                 default_filter="all" if module.id in default_on else "none",
+                viewport=manifest.viewport_lookback_seconds is not None,
                 provenance=provenance_out(manifest),
                 health=health_out(
                     health.get(module.id),

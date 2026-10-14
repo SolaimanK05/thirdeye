@@ -28,17 +28,50 @@ def backoff_delay(failures: int) -> float:
     return min(BACKOFF_CAP_SECONDS, BACKOFF_BASE_SECONDS * 2.0**doublings)
 
 
-async def run_once(module: Module, pool: Pool, client: httpx.AsyncClient) -> int:
+REDACTED = "[redacted]"
+
+
+def scrub(text: str, settings: Settings) -> str:
+    for secret in settings.secret_values():
+        text = text.replace(secret, REDACTED)
+    return text
+
+
+async def run_once(
+    module: Module, pool: Pool, client: httpx.AsyncClient, settings: Settings
+) -> int:
     fetched_at = datetime.now(UTC)
-    raw = await module.fetch(client)
-    events = module.normalize(raw, fetched_at)
+    raw = await module.fetch(client, settings)
+    parsed = module.normalize(raw, fetched_at)
+    accept = module.accept
+    events = parsed if accept is None else [e for e in parsed if accept(e, settings)]
+    if len(events) != len(parsed):
+        log.info(
+            "module.filtered",
+            module=module.id,
+            kept=len(events),
+            dropped=len(parsed) - len(events),
+        )
     async with pool.connection() as conn:
-        await store.write_events(conn, module.id, events, fetched_at)
+        await store.write_events(
+            conn,
+            module.id,
+            events,
+            fetched_at,
+            snapshot_rows=module.manifest.viewport_lookback_seconds is None,
+        )
+        keep = module.manifest.retention_seconds
+        if keep is not None:
+            removed = await store.prune_events(conn, module.id, keep, fetched_at)
+            if removed:
+                log.info("module.pruned", module=module.id, removed=removed)
     return len(events)
 
 
-async def report_failure(module: Module, pool: Pool, exc: Exception) -> None:
-    reason = f"{type(exc).__name__}: {exc}"
+async def report_failure(
+    module: Module, pool: Pool, exc: Exception, settings: Settings
+) -> None:
+    reason = scrub(f"{type(exc).__name__}: {exc}", settings)
     try:
         async with pool.connection() as conn:
             await store.record_failure(conn, module.id, reason, datetime.now(UTC))
@@ -46,14 +79,18 @@ async def report_failure(module: Module, pool: Pool, exc: Exception) -> None:
         log.error("module.health_not_saved", module=module.id, error=str(db_exc))
 
 
-async def tick(module: Module, pool: Pool, client: httpx.AsyncClient) -> bool:
+async def tick(
+    module: Module, pool: Pool, client: httpx.AsyncClient, settings: Settings
+) -> bool:
     try:
-        count = await run_once(module, pool, client)
+        count = await run_once(module, pool, client, settings)
     except Exception as exc:  # noqa: BLE001 - one module must never stop the others
         log.warning(
-            "module.failed", module=module.id, error=f"{type(exc).__name__}: {exc}"
+            "module.failed",
+            module=module.id,
+            error=scrub(f"{type(exc).__name__}: {exc}", settings),
         )
-        await report_failure(module, pool, exc)
+        await report_failure(module, pool, exc, settings)
         return False
     log.info("module.ok", module=module.id, records=count)
     return True
@@ -63,11 +100,12 @@ async def run_forever(
     module: Module,
     pool: Pool,
     client: httpx.AsyncClient,
+    settings: Settings,
     sleep: Sleep = asyncio.sleep,
 ) -> None:
     failures = 0
     while True:
-        if await tick(module, pool, client):
+        if await tick(module, pool, client, settings):
             failures = 0
             delay = float(module.manifest.cadence_seconds)
         else:
@@ -110,7 +148,7 @@ async def run(settings: Settings, *, once: bool) -> int:
         async with http_client() as client:
             if once:
                 results = await asyncio.gather(
-                    *(tick(m, pool, client) for m in modules)
+                    *(tick(m, pool, client, settings) for m in modules)
                 )
                 return 0 if all(results) else 1
             async with asyncio.TaskGroup() as tasks:
@@ -118,7 +156,9 @@ async def run(settings: Settings, *, once: bool) -> int:
                     if module.manifest.cadence_seconds == 0:
                         log.info("module.not_polled", module=module.id)
                         continue
-                    tasks.create_task(run_forever(module, pool, client), name=module.id)
+                    tasks.create_task(
+                        run_forever(module, pool, client, settings), name=module.id
+                    )
         return 0
     finally:
         await pool.close()

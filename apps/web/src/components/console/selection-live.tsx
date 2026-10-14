@@ -25,7 +25,7 @@ export function LiveSelection() {
   }
 
   if (event.data && now !== null) {
-    const selection = selectionFor(event.data, now);
+    const selection = selectionFor(event.data, now, selected.cluster);
     const { position } = event.data;
     return (
       <SelectionDock kind={selection.kind} name={selection.name}>

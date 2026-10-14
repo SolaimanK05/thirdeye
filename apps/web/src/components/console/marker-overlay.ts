@@ -37,6 +37,8 @@ const LABEL_FONT_PX = 11;
 const LABEL_PAD_X = 5;
 const LABEL_HEIGHT = 17;
 const EDGE_MARGIN = 30;
+const FLAME_HEIGHT = 1.3;
+const FLAME_IN_RING = 0.62;
 
 function place(marker: Marker): Placed {
   const position = Cartesian3.fromDegrees(marker.lon, marker.lat);
@@ -69,6 +71,88 @@ function trianglePath(
   ctx.lineTo(x + half, y + height * 0.4);
   ctx.lineTo(x - half, y + height * 0.4);
   ctx.closePath();
+}
+
+function flamePath(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  size: number,
+) {
+  const h = size * FLAME_HEIGHT;
+  const px = (u: number) => x + u * h;
+  const py = (v: number) => y + v * h;
+  ctx.moveTo(px(0.04), py(-0.5));
+  ctx.bezierCurveTo(px(0.1), py(-0.3), px(0.36), py(-0.12), px(0.32), py(0.16));
+  ctx.bezierCurveTo(px(0.3), py(0.38), px(0.16), py(0.5), px(0), py(0.5));
+  ctx.bezierCurveTo(
+    px(-0.17),
+    py(0.5),
+    px(-0.32),
+    py(0.38),
+    px(-0.32),
+    py(0.18),
+  );
+  ctx.bezierCurveTo(
+    px(-0.32),
+    py(0.02),
+    px(-0.22),
+    py(-0.08),
+    px(-0.14),
+    py(-0.18),
+  );
+  ctx.bezierCurveTo(
+    px(-0.12),
+    py(-0.08),
+    px(-0.08),
+    py(-0.02),
+    px(-0.03),
+    py(0),
+  );
+  ctx.bezierCurveTo(
+    px(-0.06),
+    py(-0.22),
+    px(-0.04),
+    py(-0.38),
+    px(0.04),
+    py(-0.5),
+  );
+  ctx.moveTo(px(0), py(0.5));
+  ctx.bezierCurveTo(
+    px(-0.12),
+    py(0.5),
+    px(-0.17),
+    py(0.38),
+    px(-0.1),
+    py(0.28),
+  );
+  ctx.bezierCurveTo(px(-0.05), py(0.2), px(0), py(0.14), px(0), py(0.06));
+  ctx.bezierCurveTo(px(0.1), py(0.16), px(0.16), py(0.26), px(0.14), py(0.34));
+  ctx.bezierCurveTo(px(0.12), py(0.44), px(0.06), py(0.5), px(0), py(0.5));
+}
+
+function flameRingPath(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  size: number,
+) {
+  const radius = size / 2;
+  ctx.moveTo(x + radius, y);
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  flamePath(ctx, x, y, size * FLAME_IN_RING);
+}
+
+function glyphPath(
+  ctx: CanvasRenderingContext2D,
+  glyph: Marker["glyph"],
+  x: number,
+  y: number,
+  size: number,
+) {
+  if (glyph === "flame") flamePath(ctx, x, y, size);
+  else if (glyph === "flame-ring") flameRingPath(ctx, x, y, size);
+  else trianglePath(ctx, x, y, size);
 }
 
 export type InViewReport = (counts: Readonly<Record<string, number>>) => void;
@@ -259,7 +343,7 @@ export class MarkerOverlay {
     for (let i = 0; i < layer.placed.length; i++) {
       const { marker } = layer.placed[i];
       if (!layer.visible[i] || marker.tone !== tone) continue;
-      trianglePath(ctx, layer.x[i], layer.y[i], marker.size);
+      glyphPath(ctx, marker.glyph, layer.x[i], layer.y[i], marker.size);
     }
     ctx.stroke();
     ctx.globalAlpha = 1;

@@ -241,6 +241,8 @@ class TestLayers:
             "module_id": "earthquakes",
             "fetched_at": None,
             "record_count": 0,
+            "matched": 0,
+            "truncated": False,
             "rows": [],
         }
         assert "last-modified" not in response.headers

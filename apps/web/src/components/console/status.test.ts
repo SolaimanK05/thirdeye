@@ -44,6 +44,27 @@ const SAMPLE_DOMAINS: DomainGroup[] = [
   { label: "INFRASTRUCTURE", modules: [row("ports", { zoomRange: [2, 4] })] },
 ];
 
+describe("moduleNote for a layer cut down to its strongest rows", () => {
+  const capped: ModuleRow = {
+    ...quakes,
+    zoomRange: [2, 4],
+    capped: { shown: 3000, matched: 41230 },
+  };
+
+  test("says how many of how many are drawn", () => {
+    expect(moduleNote(capped, 3)).toEqual({
+      text: "top 3,000 of 41,230",
+      tone: "ink-2",
+    });
+  });
+
+  test("the usual states still win over it", () => {
+    expect(moduleNote({ ...capped, filter: "none" }, 3).text).toBe("off");
+    expect(moduleNote({ ...capped, health: "stale" }, 3).tone).toBe("amber");
+    expect(moduleNote(capped, 1).text).toBe("hidden here");
+  });
+});
+
 describe("moduleNote follows the SCREENS priority order", () => {
   test("missing key wins over everything", () => {
     const row: ModuleRow = {

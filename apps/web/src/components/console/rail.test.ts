@@ -21,6 +21,18 @@ describe("effectiveFilter", () => {
   });
 });
 
+describe("toRow with capped layers", () => {
+  test("carries the cap for the module and no other", () => {
+    const caps = { earthquakes: { shown: 3, matched: 9 } };
+    expect(toRow(quakes, {}, {}, caps).capped).toEqual({
+      shown: 3,
+      matched: 9,
+    });
+    const other = moduleInfo("wildfires", "NASA FIRMS");
+    expect(toRow(other, {}, {}, caps).capped).toBeUndefined();
+  });
+});
+
 describe("toRow", () => {
   test("maps the API module onto a rail row", () => {
     expect(toRow(quakes, {}, { earthquakes: 4 })).toEqual({

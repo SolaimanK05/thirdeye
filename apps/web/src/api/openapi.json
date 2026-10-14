@@ -123,6 +123,84 @@
             }
           },
           {
+            "name": "bbox",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "west,south,east,north; west above east crosses 180",
+              "title": "Bbox"
+            },
+            "description": "west,south,east,north; west above east crosses 180"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 10000,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strongest rows first",
+              "title": "Limit"
+            },
+            "description": "Strongest rows first"
+          },
+          {
+            "name": "cell",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "maximum": 45.0,
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Merge rows inside grid cells this many degrees wide",
+              "title": "Cell"
+            },
+            "description": "Merge rows inside grid cells this many degrees wide"
+          },
+          {
+            "name": "min_severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "maximum": 100000.0,
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Drop rows, or merged cells, with less total severity",
+              "title": "Min Severity"
+            },
+            "description": "Drop rows, or merged cells, with less total severity"
+          },
+          {
             "name": "if-none-match",
             "in": "header",
             "required": false,
@@ -727,6 +805,14 @@
             "type": "integer",
             "title": "Record Count"
           },
+          "matched": {
+            "type": "integer",
+            "title": "Matched"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          },
           "rows": {
             "items": {
               "$ref": "#/components/schemas/EventRow"
@@ -736,7 +822,14 @@
           }
         },
         "type": "object",
-        "required": ["module_id", "fetched_at", "record_count", "rows"],
+        "required": [
+          "module_id",
+          "fetched_at",
+          "record_count",
+          "matched",
+          "truncated",
+          "rows"
+        ],
         "title": "Layer"
       },
       "ModuleOut": {
@@ -790,6 +883,10 @@
             "enum": ["all", "none"],
             "title": "Default Filter"
           },
+          "viewport": {
+            "type": "boolean",
+            "title": "Viewport"
+          },
           "provenance": {
             "$ref": "#/components/schemas/ProvenanceOut"
           },
@@ -808,6 +905,7 @@
           "requires_key",
           "key_env",
           "default_filter",
+          "viewport",
           "provenance",
           "health"
         ],

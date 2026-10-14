@@ -8,10 +8,14 @@ from thirdeye.config import Settings
 from thirdeye.modules.earthquakes import manifest as earthquakes_manifest
 from thirdeye.modules.earthquakes import records as earthquakes_records
 from thirdeye.modules.earthquakes import source as earthquakes_source
+from thirdeye.modules.wildfires import manifest as wildfires_manifest
+from thirdeye.modules.wildfires import records as wildfires_records
+from thirdeye.modules.wildfires import source as wildfires_source
 from thirdeye.ontology import Event, ModuleManifest
 
-type Fetch = Callable[[httpx.AsyncClient], Awaitable[bytes]]
+type Fetch = Callable[[httpx.AsyncClient, Settings], Awaitable[bytes]]
 type Normalize = Callable[[bytes, datetime], list[Event]]
+type Accept = Callable[[Event, Settings], bool]
 
 
 class RegistryError(Exception):
@@ -23,6 +27,7 @@ class Module:
     manifest: ModuleManifest
     fetch: Fetch
     normalize: Normalize
+    accept: Accept | None = None
 
     @property
     def id(self) -> str:
@@ -50,6 +55,12 @@ REGISTRY = build_registry(
             earthquakes_manifest.MANIFEST,
             earthquakes_source.fetch,
             earthquakes_records.normalize,
+        ),
+        Module(
+            wildfires_manifest.MANIFEST,
+            wildfires_source.fetch,
+            wildfires_records.normalize,
+            wildfires_records.accept,
         ),
     ]
 )

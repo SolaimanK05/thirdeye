@@ -1,5 +1,5 @@
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from psycopg import AsyncConnection
 from psycopg.rows import TupleRow
@@ -48,6 +48,10 @@ on conflict (module_id) do update set
     reason = excluded.reason
 """
 
+PRUNE_EVENTS = """
+delete from event where module_id = %s and t_start < %s
+"""
+
 NOTIFY_LAYER = "select pg_notify('layer_updated', %s)"
 
 
@@ -86,6 +90,8 @@ async def write_events(
     module_id: str,
     events: Sequence[Event],
     fetched_at: datetime,
+    *,
+    snapshot_rows: bool = True,
 ) -> None:
     async with conn.transaction(), conn.cursor() as cur:
         if events:
@@ -94,7 +100,9 @@ async def write_events(
             UPSERT_SNAPSHOT,
             {
                 "module_id": module_id,
-                "payload": Jsonb([snapshot_row(e) for e in events]),
+                "payload": Jsonb(
+                    [snapshot_row(e) for e in events] if snapshot_rows else []
+                ),
                 "fetched_at": fetched_at,
                 "record_count": len(events),
             },
@@ -111,6 +119,19 @@ async def write_events(
             },
         )
         await cur.execute(NOTIFY_LAYER, (module_id,))
+
+
+async def prune_events(
+    conn: AsyncConnection[TupleRow],
+    module_id: str,
+    keep_seconds: int,
+    now: datetime,
+) -> int:
+    async with conn.transaction(), conn.cursor() as cur:
+        await cur.execute(
+            PRUNE_EVENTS, (module_id, now - timedelta(seconds=keep_seconds))
+        )
+        return cur.rowcount
 
 
 async def record_failure(

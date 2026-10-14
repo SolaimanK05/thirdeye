@@ -1,4 +1,5 @@
 import type { ModuleInfo } from "@/api/client";
+import type { LayerCap } from "@/state/layer-caps";
 import { HEALTH_FROM_API } from "./module-status";
 import { formatClock } from "./time";
 import type { DomainGroup, Filter, ModuleRow, ZoomLevel } from "./types";
@@ -30,6 +31,7 @@ export function toRow(
   module: ModuleInfo,
   chosen: Readonly<Record<string, Filter>>,
   inView: Readonly<Record<string, number>>,
+  capped: Readonly<Record<string, LayerCap>> = {},
 ): ModuleRow {
   const { zoom_range: range, health } = module;
   return {
@@ -41,6 +43,7 @@ export function toRow(
     loaded: health.record_count,
     starredCount: 0,
     inView: inView[module.id],
+    capped: capped[module.id],
     missingKey: module.key_env ?? undefined,
     failure: health.reason ?? undefined,
     lastGood: health.fetched_at
@@ -53,12 +56,13 @@ export function buildDomains(
   modules: readonly ModuleInfo[],
   chosen: Readonly<Record<string, Filter>>,
   inView: Readonly<Record<string, number>>,
+  capped: Readonly<Record<string, LayerCap>> = {},
 ): DomainGroup[] {
   const groups = new Map<Domain, ModuleRow[]>();
   for (const module of modules) {
     if (!module.enabled) continue;
     const rows = groups.get(module.domain) ?? [];
-    rows.push(toRow(module, chosen, inView));
+    rows.push(toRow(module, chosen, inView, capped));
     groups.set(module.domain, rows);
   }
   return [...groups].map(([domain, rows]) => ({

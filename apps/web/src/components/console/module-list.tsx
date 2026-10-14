@@ -4,6 +4,7 @@ import { Star } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useFilters } from "@/state/filters";
 import { useConsole } from "./console-shell";
+import { formatCount } from "./count";
 import { cx } from "./cx";
 import { Disclosure } from "./disclosure";
 import { type FilterChoice, FilterMenu } from "./filter-menu";
@@ -320,7 +321,7 @@ function ModuleRowItem({ row, zoom }: { row: ModuleRow; zoom: ZoomLevel }) {
       </span>
 
       <span className="text-right text-ink-3 text-label tracking-normal tabular-nums">
-        {shown && row.inView ? row.inView : ""}
+        {shown && row.inView ? formatCount(row.inView) : ""}
       </span>
 
       {row.health === "missing-key" ? (

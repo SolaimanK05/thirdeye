@@ -21,6 +21,7 @@ import "cesium/Build/Cesium/Widgets/widgets.css";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { useInView } from "@/state/in-view";
 import { useSelection } from "@/state/selection";
+import { useViewport } from "@/state/viewport";
 import { useConsole } from "./console-shell";
 import { GLOBE_CREDITS_ID } from "./globe-config";
 import { isVectorStyle, mapDetailFor } from "./globe-style";
@@ -70,6 +71,20 @@ function applyStyle(globe: Globe, style: GlobeStyle, zoomPercent: number) {
   scene.requestRender();
 }
 
+function publishViewport(widget: CesiumWidget) {
+  const rectangle = widget.camera.computeViewRectangle();
+  useViewport.getState().setBox(
+    rectangle
+      ? {
+          west: CesiumMath.toDegrees(rectangle.west),
+          south: CesiumMath.toDegrees(rectangle.south),
+          east: CesiumMath.toDegrees(rectangle.east),
+          north: CesiumMath.toDegrees(rectangle.north),
+        }
+      : null,
+  );
+}
+
 function trackDisc(widget: CesiumWidget, element: HTMLElement) {
   const { scene, camera } = widget;
   const radius = Ellipsoid.default.maximumRadius;
@@ -100,13 +115,16 @@ function watchPointer(widget: CesiumWidget, overlay: MarkerOverlay) {
   handler.setInputAction(
     ({ position }: ScreenSpaceEventHandler.PositionedEvent) => {
       const hit = overlay.hitTest(position.x, position.y);
-      useSelection
-        .getState()
-        .select(
-          hit
-            ? { kind: "event", id: hit.marker.id, moduleId: hit.moduleId }
-            : null,
-        );
+      useSelection.getState().select(
+        hit
+          ? {
+              kind: "event",
+              id: hit.marker.id,
+              moduleId: hit.moduleId,
+              cluster: hit.marker.cluster,
+            }
+          : null,
+      );
     },
     ScreenSpaceEventType.LEFT_CLICK,
   );
@@ -140,6 +158,7 @@ export default function GlobeCanvas() {
       lat: CesiumMath.toDegrees(latitude),
       lon: CesiumMath.toDegrees(longitude),
     });
+    publishViewport(widget);
   });
 
   useEffect(() => {
@@ -232,8 +251,10 @@ export default function GlobeCanvas() {
     const removeMoveEnd = camera.moveEnd.addEventListener(() =>
       onCameraMoved(widget),
     );
+    publishViewport(widget);
 
     return () => {
+      useViewport.getState().setBox(null);
       setOverlay(null);
       stopPointer();
       markers.destroy();
