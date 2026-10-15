@@ -10,6 +10,7 @@ export function moduleInfo(
     id,
     name: id,
     domain: "earth",
+    kind: "events",
     enabled: true,
     cadence_seconds: 60,
     zoom_range: { min: 1, max: 4 },

@@ -1,4 +1,5 @@
-import type { ModuleInfo, WatchItem } from "@/api/client";
+import type { ModuleInfo } from "@/api/client";
+import type { StarItem } from "@/api/watchlist";
 import type { LayerCap } from "@/state/layer-caps";
 import { HEALTH_FROM_API } from "./module-status";
 import { formatClock, relativeAge } from "./time";
@@ -99,21 +100,24 @@ export function starredTone(ageMs: number): StarredEntity["tone"] {
 }
 
 export function toStarred(
-  items: readonly WatchItem[],
+  items: readonly StarItem[],
   modules: readonly Pick<ModuleInfo, "id" | "name">[],
   nowMs: number,
 ): StarredEntity[] {
   const names = new Map(modules.map((module) => [module.id, module.name]));
   return items.map((item) => {
-    const seen = new Date(item.last_seen);
+    const seen = item.last_seen === null ? null : new Date(item.last_seen);
     return {
       id: item.entity_id,
       name: item.name,
       moduleId: item.module_id,
       module: names.get(item.module_id) ?? item.module_id,
       position: item.position,
-      age: relativeAge(seen, nowMs),
-      tone: starredTone(Math.max(0, nowMs - seen.getTime())),
+      age: seen === null ? "no data" : relativeAge(seen, nowMs),
+      tone:
+        seen === null
+          ? "normal"
+          : starredTone(Math.max(0, nowMs - seen.getTime())),
     };
   });
 }

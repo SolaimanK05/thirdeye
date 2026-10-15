@@ -203,6 +203,36 @@ export interface components {
       | "facility"
       | "org"
       | "place";
+    /** EntityRow */
+    EntityRow: {
+      /** Id */
+      id: string;
+      kind: components["schemas"]["EntityKind"];
+      /** Name */
+      name: string;
+      /** Lon */
+      lon: number;
+      /** Lat */
+      lat: number;
+      /**
+       * T
+       * Format: date-time
+       */
+      t: string;
+      /** Sog */
+      sog: number | null;
+      /** Cog */
+      cog: number | null;
+      /** Heading */
+      heading: number | null;
+      /** Alt */
+      alt: number | null;
+      confidence: components["schemas"]["Confidence"];
+      /** Attrs */
+      attrs: {
+        [key: string]: components["schemas"]["JsonValue"];
+      };
+    };
     /** ErrorBody */
     ErrorBody: {
       error: components["schemas"]["ErrorDetail"];
@@ -325,6 +355,11 @@ export interface components {
       truncated: boolean;
       /** Rows */
       rows: components["schemas"]["EventRow"][];
+      /**
+       * Entities
+       * @default []
+       */
+      entities: components["schemas"]["EntityRow"][];
     };
     /** ModuleOut */
     ModuleOut: {
@@ -333,6 +368,11 @@ export interface components {
       /** Name */
       name: string;
       domain: components["schemas"]["Domain"];
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: "events" | "entities";
       /** Enabled */
       enabled: boolean;
       /** Cadence Seconds */
@@ -406,6 +446,8 @@ export interface components {
       category: string;
       /** Label */
       label: string;
+      /** Detail */
+      detail: string | null;
       /** Severity */
       severity: number | null;
       /** T */

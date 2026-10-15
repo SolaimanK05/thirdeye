@@ -216,6 +216,8 @@ class Recorder:
         self.snapshot_rows: dict[str, bool] = {}
         self.failures: list[tuple[str, str]] = []
         self.prunes: list[tuple[str, int]] = []
+        self.entity_writes: list[dict[str, Any]] = []
+        self.observation_prunes: list[tuple[str, int]] = []
 
     async def prune_events(
         self, conn: object, module_id: str, keep_seconds: int, now: datetime
@@ -235,6 +237,34 @@ class Recorder:
         self.writes.append((module_id, len(events)))
         self.snapshot_rows[module_id] = snapshot_rows
 
+    async def write_entities(
+        self,
+        conn: object,
+        module_id: str,
+        source_id: str,
+        reports: list[Any],
+        fetched_at: datetime,
+        *,
+        latest_only: bool,
+        snapshot_window_seconds: int | None,
+    ) -> int:
+        self.entity_writes.append(
+            {
+                "module_id": module_id,
+                "source_id": source_id,
+                "count": len(reports),
+                "latest_only": latest_only,
+                "window": snapshot_window_seconds,
+            }
+        )
+        return len(reports)
+
+    async def prune_observations(
+        self, conn: object, source_id: str, keep_seconds: int, now: datetime
+    ) -> int:
+        self.observation_prunes.append((source_id, keep_seconds))
+        return 0
+
     async def record_failure(
         self, conn: object, module_id: str, reason: str, failed_at: datetime
     ) -> None:
@@ -247,4 +277,6 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> Recorder:
     monkeypatch.setattr(store, "write_events", rec.write_events)
     monkeypatch.setattr(store, "record_failure", rec.record_failure)
     monkeypatch.setattr(store, "prune_events", rec.prune_events)
+    monkeypatch.setattr(store, "write_entities", rec.write_entities)
+    monkeypatch.setattr(store, "prune_observations", rec.prune_observations)
     return rec

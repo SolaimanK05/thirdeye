@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { searchStatus } from "./search-field";
+import { EMPTY_TEXT, searchStatus } from "./search-field";
 
 const base = {
   text: "ever",
@@ -27,8 +27,13 @@ describe("searchStatus", () => {
   });
 
   test("reports empty and counted results", () => {
-    expect(searchStatus({ ...base, count: 0 })).toBe('Nothing matches "ever".');
-    expect(searchStatus({ ...base, count: 1 })).toBe("1 result");
-    expect(searchStatus({ ...base, count: 3 })).toBe("3 results");
+    expect(searchStatus({ ...base, count: 0 })).toBe(EMPTY_TEXT);
+    expect(EMPTY_TEXT).toBe(
+      "No match in enabled modules. Names, IMO, MMSI, ICAO24, callsign and place are searched.",
+    );
+    expect(searchStatus({ ...base, count: 1 })).toBe("1 match across modules");
+    expect(searchStatus({ ...base, count: 3 })).toBe(
+      "3 matches across modules",
+    );
   });
 });

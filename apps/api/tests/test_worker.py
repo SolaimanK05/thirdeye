@@ -1,5 +1,7 @@
 import asyncio
 from collections.abc import AsyncIterator
+from datetime import datetime
+from pathlib import Path
 
 import httpx
 import pytest
@@ -7,9 +9,12 @@ from conftest import POOL, Recorder
 
 from thirdeye import worker
 from thirdeye.config import Settings
+from thirdeye.modules.ports import records as ports_records
 from thirdeye.modules.wildfires import records as wildfire_records
+from thirdeye.ontology import EntityReport
 from thirdeye.registry import REGISTRY, Fetch, Module
 
+PORTS_FIXTURE = Path(__file__).parents[1] / "src/thirdeye/modules/ports/fixture.csv"
 SETTINGS = Settings(database_url="postgresql://t:t@127.0.0.1:1/t", _env_file=None)
 
 
@@ -122,3 +127,63 @@ async def test_a_module_can_filter_what_it_stores(
     )
     await worker.tick(module, POOL, client, SETTINGS)
     assert recorder.writes == [("earthquakes", 1)]
+
+
+def one_port(raw: bytes, at: datetime) -> list[EntityReport]:
+    return ports_records.normalize_entities(PORTS_FIXTURE.read_bytes(), at)[:1]
+
+
+def entity_module(**changes: object) -> Module:
+    base = REGISTRY["ports"].manifest
+    manifest = base.model_copy(update={"cadence_seconds": 600, **changes})
+    return Module(manifest, ok_fetch, normalize_entities=one_port)
+
+
+async def test_entity_modules_are_written_through_write_entities(
+    recorder: Recorder, client: httpx.AsyncClient
+) -> None:
+    assert await worker.tick(entity_module(), POOL, client, SETTINGS) is True
+    assert recorder.writes == []
+    assert recorder.entity_writes == [
+        {
+            "module_id": "ports",
+            "source_id": "nga-wpi",
+            "count": 1,
+            "latest_only": True,
+            "window": None,
+        }
+    ]
+    assert recorder.observation_prunes == []
+
+
+async def test_movers_keep_history_and_prune_it(
+    recorder: Recorder, client: httpx.AsyncClient
+) -> None:
+    module = entity_module(
+        observation_retention_seconds=3600, snapshot_window_seconds=900
+    )
+    await worker.tick(module, POOL, client, SETTINGS)
+    [write] = recorder.entity_writes
+    assert write["latest_only"] is False
+    assert write["window"] == 900
+    assert recorder.observation_prunes == [("nga-wpi", 3600)]
+
+
+async def test_a_module_with_nothing_to_fetch_cannot_be_ticked(
+    recorder: Recorder, client: httpx.AsyncClient
+) -> None:
+    manifest = REGISTRY["ports"].manifest.model_copy(update={"cadence_seconds": 0})
+    module = Module(manifest, None, normalize_entities=one_port)
+    assert await worker.tick(module, POOL, client, SETTINGS) is False
+    assert recorder.entity_writes == []
+    assert recorder.failures[0][0] == "ports"
+
+
+async def test_a_download_with_no_usable_records_is_a_failure_not_an_update(
+    recorder: Recorder, client: httpx.AsyncClient
+) -> None:
+    base = REGISTRY["ports"]
+    module = Module(base.manifest, ok_fetch, normalize_entities=lambda raw, at: [])
+    assert await worker.tick(module, POOL, client, SETTINGS) is False
+    assert recorder.entity_writes == []
+    assert "no usable records" in recorder.failures[0][1]

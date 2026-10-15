@@ -466,6 +466,7 @@ describe("client boundary", () => {
       "module-list.tsx",
       "module-status-lines.tsx",
       "modules-drawer.tsx",
+      "public-badge.tsx",
       "search-field.tsx",
       "selection-dock.tsx",
       "selection-live.tsx",

@@ -1,9 +1,10 @@
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Response, status
-from pydantic import AwareDatetime, JsonValue
+from pydantic import AwareDatetime
 
 from thirdeye.deps import ReaderDep, SettingsDep, WriterDep
+from thirdeye.identity import display_name
 from thirdeye.ontology import EntityKind
 from thirdeye.reads import WatchRecord
 from thirdeye.routes.models import Out, Position
@@ -26,18 +27,6 @@ class WatchItem(Out):
 class Watchlist(Out):
     writable: bool
     items: list[WatchItem]
-
-
-def display_name(
-    names: list[str], identifiers: dict[str, JsonValue], entity_id: UUID
-) -> str:
-    for name in names:
-        if name.strip():
-            return name.strip()
-    for value in identifiers.values():
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return str(entity_id)[:8]
 
 
 def watch_item(record: WatchRecord) -> WatchItem:

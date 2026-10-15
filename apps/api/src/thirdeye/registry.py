@@ -8,13 +8,17 @@ from thirdeye.config import Settings
 from thirdeye.modules.earthquakes import manifest as earthquakes_manifest
 from thirdeye.modules.earthquakes import records as earthquakes_records
 from thirdeye.modules.earthquakes import source as earthquakes_source
+from thirdeye.modules.ports import manifest as ports_manifest
+from thirdeye.modules.ports import records as ports_records
+from thirdeye.modules.ports import source as ports_source
 from thirdeye.modules.wildfires import manifest as wildfires_manifest
 from thirdeye.modules.wildfires import records as wildfires_records
 from thirdeye.modules.wildfires import source as wildfires_source
-from thirdeye.ontology import Event, ModuleManifest
+from thirdeye.ontology import EntityReport, Event, ModuleManifest
 
 type Fetch = Callable[[httpx.AsyncClient, Settings], Awaitable[bytes]]
 type Normalize = Callable[[bytes, datetime], list[Event]]
+type NormalizeEntities = Callable[[bytes, datetime], list[EntityReport]]
 type Accept = Callable[[Event, Settings], bool]
 
 
@@ -25,9 +29,10 @@ class RegistryError(Exception):
 @dataclass(frozen=True, slots=True)
 class Module:
     manifest: ModuleManifest
-    fetch: Fetch
-    normalize: Normalize
+    fetch: Fetch | None
+    normalize: Normalize | None = None
     accept: Accept | None = None
+    normalize_entities: NormalizeEntities | None = None
 
     @property
     def id(self) -> str:
@@ -40,11 +45,33 @@ class Module:
         )
 
 
+def check_module(module: Module) -> None:
+    manifest = module.manifest
+    if (module.normalize is None) == (module.normalize_entities is None):
+        raise RegistryError(
+            f"module {module.id!r} must set exactly one of normalize "
+            "and normalize_entities"
+        )
+    produces = "events" if module.normalize is not None else "entities"
+    if manifest.kind != produces:
+        raise RegistryError(
+            f"module {module.id!r} is declared as {manifest.kind} "
+            f"but its normaliser produces {produces}"
+        )
+    if module.accept is not None and module.normalize is None:
+        raise RegistryError(f"module {module.id!r} filters events it never makes")
+    if module.fetch is None and manifest.cadence_seconds != 0:
+        raise RegistryError(
+            f"module {module.id!r} has no fetch, so its cadence must be 0"
+        )
+
+
 def build_registry(modules: Iterable[Module]) -> dict[str, Module]:
     registry: dict[str, Module] = {}
     for module in modules:
         if module.id in registry:
             raise RegistryError(f"duplicate module id {module.id!r}")
+        check_module(module)
         registry[module.id] = module
     return registry
 
@@ -61,6 +88,11 @@ REGISTRY = build_registry(
             wildfires_source.fetch,
             wildfires_records.normalize,
             wildfires_records.accept,
+        ),
+        Module(
+            ports_manifest.MANIFEST,
+            ports_source.fetch,
+            normalize_entities=ports_records.normalize_entities,
         ),
     ]
 )

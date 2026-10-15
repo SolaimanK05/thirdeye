@@ -5,6 +5,7 @@ import { AlertsButton } from "./footer";
 import { GlobeStyleMenu } from "./globe-style-menu";
 import { MobileSearch } from "./mobile-search";
 import { ModulesDrawer } from "./modules-drawer";
+import { PublicBadge } from "./public-badge";
 import { SearchField } from "./search-field";
 import type { ConsoleSnapshot } from "./types";
 
@@ -25,6 +26,7 @@ export function Header({ instance, alerts, menu }: Props) {
         <span className="hidden border-line border-l pl-2.5 text-ink-3 text-micro uppercase xl:inline">
           {instance}
         </span>
+        <PublicBadge />
       </div>
 
       <search className="hidden min-w-0 lg:block lg:max-w-155 lg:flex-[1_1_240px] xl:flex-[1_1_320px]">

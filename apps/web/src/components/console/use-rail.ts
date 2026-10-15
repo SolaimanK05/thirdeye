@@ -1,9 +1,10 @@
 "use client";
 
-import { useModules, useWatchlist } from "@/api/queries";
+import { useModules } from "@/api/queries";
 import { useFilters } from "@/state/filters";
 import { useInView } from "@/state/in-view";
 import { useLayerCaps } from "@/state/layer-caps";
+import { useStarred } from "@/state/starred";
 import { buildDomains, countStarred } from "./rail";
 import type { DomainGroup } from "./types";
 
@@ -17,8 +18,8 @@ export function useRail(): Rail {
   const chosen = useFilters((state) => state.filters);
   const counts = useInView((state) => state.counts);
   const caps = useLayerCaps((state) => state.caps);
-  const watchlist = useWatchlist().data;
-  const starred = watchlist ? countStarred(watchlist.items) : undefined;
+  const stars = useStarred();
+  const starred = stars.ready ? countStarred(stars.items) : undefined;
   const domains = data ? buildDomains(data, chosen, counts, caps, starred) : [];
   if (data) return { status: "ready", domains };
   return {

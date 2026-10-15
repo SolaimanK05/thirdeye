@@ -75,6 +75,7 @@ class SearchRecord(Record):
     lon: float | None
     lat: float | None
     starred: bool
+    identifiers: dict[str, JsonValue] | None = None
 
 
 class HealthRecord(Record):
@@ -248,7 +249,7 @@ select
         (select value from jsonb_each_text(e.identifiers) limit 1)
     ) as label,
     null::double precision as severity, e.last_seen as t,
-    o.lon, o.lat, (w.entity_id is not null) as starred
+    o.lon, o.lat, (w.entity_id is not null) as starred, e.identifiers
 from entity e
 join source s on s.id = e.source_id
 left join watchlist_entry w on w.entity_id = e.id

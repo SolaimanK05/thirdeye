@@ -9,7 +9,7 @@ import psycopg
 import structlog
 from pydantic import AwareDatetime, BaseModel, JsonValue
 
-from thirdeye.ontology import Confidence
+from thirdeye.ontology import Confidence, EntityKind
 from thirdeye.reads import SnapshotRecord, Viewport, ViewRecord
 
 log = structlog.get_logger()
@@ -40,6 +40,21 @@ class EventRow(BaseModel):
     attrs: dict[str, JsonValue]
 
 
+class EntityRow(BaseModel):
+    id: str
+    kind: EntityKind
+    name: str
+    lon: float
+    lat: float
+    t: AwareDatetime
+    sog: float | None
+    cog: float | None
+    heading: float | None
+    alt: float | None
+    confidence: Confidence
+    attrs: dict[str, JsonValue]
+
+
 class Layer(BaseModel):
     module_id: str
     fetched_at: AwareDatetime | None
@@ -47,6 +62,7 @@ class Layer(BaseModel):
     matched: int
     truncated: bool
     rows: list[EventRow]
+    entities: list[EntityRow] = []
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +111,37 @@ def build_view_layer(module_id: str, view: ViewRecord | None) -> CachedLayer:
     )
 
 
+def in_box(row: EntityRow, box: Viewport) -> bool:
+    if not box.south <= row.lat <= box.north:
+        return False
+    if box.wraps:
+        return row.lon >= box.west or row.lon <= box.east
+    return box.west <= row.lon <= box.east
+
+
+def build_entity_layer(
+    module_id: str, snapshot: SnapshotRecord | None, box: Viewport | None
+) -> CachedLayer:
+    rows = (
+        []
+        if snapshot is None
+        else [EntityRow.model_validate(item) for item in snapshot.payload]
+    )
+    inside = rows if box is None else [row for row in rows if in_box(row, box)]
+    shown = inside if box is None else inside[: box.limit]
+    return encode_layer(
+        Layer(
+            module_id=module_id,
+            fetched_at=None if snapshot is None else snapshot.fetched_at,
+            record_count=len(shown),
+            matched=len(inside),
+            truncated=len(inside) > len(shown),
+            rows=[],
+            entities=shown,
+        )
+    )
+
+
 class LayerCache:
     def __init__(self, load: Loader, load_view: ViewLoader | None = None) -> None:
         self._load = load
@@ -117,6 +164,19 @@ class LayerCache:
             (module_id, viewport),
             lambda: self._view_layer(load_view, module_id, viewport),
         )
+
+    async def get_entities(
+        self, module_id: str, viewport: Viewport | None
+    ) -> CachedLayer:
+        return await self._get(
+            (module_id, viewport),
+            lambda: self._entity_layer(module_id, viewport),
+        )
+
+    async def _entity_layer(
+        self, module_id: str, viewport: Viewport | None
+    ) -> CachedLayer:
+        return build_entity_layer(module_id, await self._load(module_id), viewport)
 
     async def _snapshot_layer(self, module_id: str) -> CachedLayer:
         return build_layer(module_id, await self._load(module_id))

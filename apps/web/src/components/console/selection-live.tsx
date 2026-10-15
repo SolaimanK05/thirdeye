@@ -1,16 +1,13 @@
 "use client";
 
 import { useCallback, useEffect } from "react";
-import { ApiRequestError } from "@/api/client";
-import {
-  useEntity,
-  useEvent,
-  useStarEntity,
-  useWatchlist,
-} from "@/api/queries";
-import { entitySelection } from "@/modules/entity";
-import { selectionFor } from "@/modules/registry";
+import { ApiRequestError, type EntityDetail } from "@/api/client";
+import { useEntity, useEvent } from "@/api/queries";
+import type { StarTarget } from "@/api/watchlist";
+import { entityName } from "@/modules/entity";
+import { entitySelectionFor, selectionFor } from "@/modules/registry";
 import { type SelectedItem, useSelection } from "@/state/selection";
+import { useStarred } from "@/state/starred";
 import { isPlainKey } from "./hotkeys";
 import { SelectionDock } from "./selection-dock";
 import { SelectionDetails, SelectionMessage } from "./selection-panel";
@@ -77,6 +74,17 @@ function EventSelection({
   );
 }
 
+function starTarget(moduleId: string, detail: EntityDetail): StarTarget {
+  return {
+    id: detail.id,
+    moduleId,
+    name: entityName(detail),
+    kind: detail.kind,
+    position: detail.last_observation?.position ?? null,
+    lastSeen: detail.last_seen,
+  };
+}
+
 function EntitySelection({
   item,
 }: {
@@ -84,19 +92,15 @@ function EntitySelection({
 }) {
   const focusOn = useSelection((state) => state.focusOn);
   const entity = useEntity(item.id);
-  const watchlist = useWatchlist();
+  const stars = useStarred();
   const now = useNow();
+  const detail = entity.data;
+  const { toggle: toggleStar, noteOpen, dismissNote } = stars;
 
-  const { mutate, isPending, isError } = useStarEntity();
-  const canStar = watchlist.data?.writable === true;
-  const starred =
-    watchlist.data?.items.some((entry) => entry.entity_id === item.id) ?? false;
-
+  const ready = stars.ready;
   const toggle = useCallback(() => {
-    if (canStar && !isPending) {
-      mutate({ entityId: item.id, starred: !starred });
-    }
-  }, [canStar, isPending, mutate, item.id, starred]);
+    if (detail && ready) toggleStar(starTarget(item.moduleId, detail));
+  }, [detail, ready, toggleStar, item.moduleId]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -108,11 +112,36 @@ function EntitySelection({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [toggle]);
 
-  if (entity.data && now !== null) {
-    const selection = entitySelection(entity.data, now, { starred, canStar });
-    const position = entity.data.last_observation?.position;
+  useEffect(() => dismissNote, [dismissNote]);
+
+  if (detail && now !== null) {
+    const selection = entitySelectionFor(item.moduleId, detail, now, {
+      starred: stars.isStarred(item.id),
+      canStar: stars.ready,
+    });
+    const position = detail.last_observation?.position;
     return (
       <SelectionDock kind={selection.kind} name={selection.name}>
+        {stars.failed && (
+          <p role="alert" className="px-4 pt-3 text-red text-secondary">
+            Couldn't update the watchlist.
+          </p>
+        )}
+        {noteOpen && (
+          <p
+            role="status"
+            className="flex items-start justify-between gap-3 px-4 pt-3 text-secondary text-ink-2"
+          >
+            <span>Stars on this instance are saved in this browser only.</span>
+            <button
+              type="button"
+              onClick={dismissNote}
+              className="min-h-11 shrink-0 text-accent underline-offset-2 hover:underline"
+            >
+              Got it
+            </button>
+          </p>
+        )}
         <SelectionDetails
           selection={selection}
           onAction={(action) => {
@@ -120,11 +149,6 @@ function EntitySelection({
             if (action === "center" && position) focusOn(position);
           }}
         />
-        {isError && (
-          <p role="alert" className="px-4 pb-3 text-red text-secondary">
-            Couldn't update the watchlist.
-          </p>
-        )}
       </SelectionDock>
     );
   }

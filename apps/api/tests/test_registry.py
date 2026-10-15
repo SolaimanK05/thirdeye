@@ -49,3 +49,80 @@ def test_unknown_enabled_module_is_rejected() -> None:
 
 def test_enabled_keeps_order_and_drops_repeats() -> None:
     assert [m.id for m in enabled(["earthquakes", "earthquakes"])] == ["earthquakes"]
+
+
+def entity_manifest(**changes: Any) -> ModuleManifest:
+    return ModuleManifest.model_validate(
+        manifest_data(id="things", kind="entities", **changes)
+    )
+
+
+async def no_fetch(client: object, settings: object) -> bytes:
+    return b""
+
+
+def test_an_entity_module_must_make_entities() -> None:
+    with pytest.raises(RegistryError, match="declared as entities"):
+        build_registry([Module(entity_manifest(), no_fetch, lambda raw, at: [])])
+
+
+def test_an_event_module_cannot_make_entities() -> None:
+    module = Module(
+        MANIFEST, REGISTRY["earthquakes"].fetch, normalize_entities=lambda raw, at: []
+    )
+    with pytest.raises(RegistryError, match="declared as events"):
+        build_registry([module])
+
+
+def test_a_module_needs_exactly_one_normaliser() -> None:
+    with pytest.raises(RegistryError, match="exactly one"):
+        build_registry([Module(MANIFEST, REGISTRY["earthquakes"].fetch)])
+    both = Module(
+        MANIFEST,
+        REGISTRY["earthquakes"].fetch,
+        lambda raw, at: [],
+        normalize_entities=lambda raw, at: [],
+    )
+    with pytest.raises(RegistryError, match="exactly one"):
+        build_registry([both])
+
+
+def test_only_a_module_that_is_never_polled_can_skip_fetch() -> None:
+    polled = Module(MANIFEST, None, lambda raw, at: [])
+    with pytest.raises(RegistryError, match="cadence must be 0"):
+        build_registry([polled])
+    quiet = Module(
+        entity_manifest(cadence_seconds=0), None, normalize_entities=lambda raw, at: []
+    )
+    assert "things" in build_registry([quiet])
+
+
+def test_only_event_modules_can_filter_events() -> None:
+    module = Module(
+        entity_manifest(cadence_seconds=0),
+        None,
+        normalize_entities=lambda raw, at: [],
+        accept=lambda event, settings: True,
+    )
+    with pytest.raises(RegistryError, match="filters events"):
+        build_registry([module])
+
+
+def test_an_entity_manifest_cannot_use_event_retention() -> None:
+    with pytest.raises(ValidationError, match="observation_retention_seconds"):
+        entity_manifest(retention_seconds=3600)
+    with pytest.raises(ValidationError, match="observation_retention_seconds"):
+        entity_manifest(viewport_lookback_seconds=3600)
+
+
+def test_an_event_manifest_cannot_use_observation_retention() -> None:
+    with pytest.raises(ValidationError, match="only for entity modules"):
+        ModuleManifest.model_validate(manifest_data(observation_retention_seconds=3600))
+    with pytest.raises(ValidationError, match="only for entity modules"):
+        ModuleManifest.model_validate(manifest_data(snapshot_window_seconds=60))
+
+
+def test_ports_is_registered_as_an_entity_module() -> None:
+    ports = REGISTRY["ports"]
+    assert ports.manifest.kind == "entities"
+    assert REGISTRY["earthquakes"].manifest.kind == "events"

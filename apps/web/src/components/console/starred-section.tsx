@@ -3,6 +3,7 @@
 import { Star } from "lucide-react";
 import { useModules, useWatchlist } from "@/api/queries";
 import { useSelection } from "@/state/selection";
+import { useStarred } from "@/state/starred";
 import { cx } from "./cx";
 import { Disclosure } from "./disclosure";
 import { toStarred } from "./rail";
@@ -17,14 +18,15 @@ const AGE_TONE: Record<StarredEntity["tone"], string> = {
 
 export function StarredSection() {
   const watchlist = useWatchlist();
+  const stars = useStarred();
   const modules = useModules();
   const select = useSelection((state) => state.select);
   const focusOn = useSelection((state) => state.focusOn);
   const now = useNow();
 
   const entities =
-    watchlist.data && now !== null
-      ? toStarred(watchlist.data.items, modules.data ?? [], now)
+    stars.ready && now !== null
+      ? toStarred(stars.items, modules.data ?? [], now)
       : [];
 
   return (
@@ -45,9 +47,7 @@ export function StarredSection() {
         </p>
       ) : entities.length === 0 ? (
         <p className="px-3 text-ink-3 text-secondary">
-          {watchlist.data?.writable === false
-            ? "Starring is off on this instance."
-            : "None yet. Select an entity, press s."}
+          None yet. Select an entity, press s.
         </p>
       ) : (
         <ul>

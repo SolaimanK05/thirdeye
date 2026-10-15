@@ -1,5 +1,5 @@
 unexport PYTHONPATH
-.PHONY: dev-web dev-api dev-worker worker-once api-types lint typecheck test
+.PHONY: dev-web dev-api dev-worker worker-once import-ports api-types lint typecheck test
 dev-web:
 	pnpm --dir apps/web dev
 dev-api:
@@ -8,6 +8,9 @@ dev-worker:
 	cd apps/api && uv run python -m thirdeye.worker
 worker-once:
 	cd apps/api && uv run python -m thirdeye.worker --once
+import-ports:
+	@test -n "$(FILE)" || { echo "usage: make import-ports FILE=path/to/ports.csv"; exit 2; }
+	cd apps/api && uv run python -m thirdeye.importer ports "$(abspath $(FILE))"
 api-types:
 	cd apps/api && uv run python -m thirdeye.openapi ../web/src/api/openapi.json
 	pnpm --dir apps/web run api:types

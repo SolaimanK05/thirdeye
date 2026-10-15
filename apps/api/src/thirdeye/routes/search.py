@@ -1,9 +1,10 @@
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Query
-from pydantic import AwareDatetime, StringConstraints
+from pydantic import AwareDatetime, JsonValue, StringConstraints
 
 from thirdeye.deps import EnabledDep, ReaderDep
+from thirdeye.identity import key_text
 from thirdeye.reads import SearchRecord
 from thirdeye.routes.models import Out, Position
 
@@ -28,6 +29,7 @@ class SearchHit(Out):
     module_id: str
     category: str
     label: str
+    detail: str | None
     severity: float | None
     t: AwareDatetime | None
     position: Position | None
@@ -37,6 +39,31 @@ class SearchHit(Out):
 class SearchResults(Out):
     query: str
     results: list[SearchHit]
+
+
+IDENTIFIER_LINE = (
+    ("imo", "IMO"),
+    ("mmsi", "MMSI"),
+    ("icao24", "ICAO24"),
+    ("callsign", "CALLSIGN"),
+    ("reg", "REG"),
+    ("norad_id", "NORAD"),
+    ("wpi", "WPI"),
+    ("unlocode", "UN/LOCODE"),
+    ("lei", "LEI"),
+    ("osm_id", "OSM"),
+)
+
+
+def identifier_line(identifiers: dict[str, JsonValue] | None) -> str | None:
+    if not identifiers:
+        return None
+    parts = [
+        f"{label} {text}"
+        for key, label in IDENTIFIER_LINE
+        if (text := key_text(identifiers.get(key))) is not None
+    ]
+    return ", ".join(parts) or None
 
 
 def humanize(category: str) -> str:
@@ -51,6 +78,7 @@ def search_hit(record: SearchRecord) -> SearchHit:
         module_id=record.module_id,
         category=record.category,
         label=(record.label or "").strip() or humanize(record.category),
+        detail=identifier_line(record.identifiers),
         severity=record.severity,
         t=record.t,
         position=(

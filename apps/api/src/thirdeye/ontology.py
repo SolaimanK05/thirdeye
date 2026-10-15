@@ -79,6 +79,8 @@ class Identifiers(Model):
     norad_id: int | None = None
     lei: str | None = None
     osm_id: str | None = None
+    wpi: str | None = None
+    unlocode: str | None = None
 
 
 class Source(Model):
@@ -114,8 +116,24 @@ class Observation(Model):
     geom: Point
     sog: Annotated[float, Field(ge=0)] | None = None
     cog: Annotated[float, Field(ge=0, lt=360)] | None = None
+    heading: Annotated[float, Field(ge=0, lt=360)] | None = None
     alt: float | None = None
     confidence: Confidence
+
+
+class Fix(Model):
+    t: AwareDatetime
+    geom: Point
+    sog: Annotated[float, Field(ge=0)] | None = None
+    cog: Annotated[float, Field(ge=0, lt=360)] | None = None
+    heading: Annotated[float, Field(ge=0, lt=360)] | None = None
+    alt: float | None = None
+    confidence: Confidence
+
+
+class EntityReport(Model):
+    entity: Entity
+    fix: Fix | None = None
 
 
 class Event(Model):
@@ -156,6 +174,7 @@ class ModuleManifest(Model):
     id: Slug
     name: str
     domain: Domain
+    kind: Literal["events", "entities"] = "events"
     cadence_seconds: Annotated[int, Field(ge=0)]
     zoom_range: tuple[ZoomLevel, ZoomLevel] | None
     requires_key: bool
@@ -165,6 +184,30 @@ class ModuleManifest(Model):
     provenance: Provenance
     viewport_lookback_seconds: Annotated[int, Field(gt=0)] | None = None
     retention_seconds: Annotated[int, Field(gt=0)] | None = None
+    observation_retention_seconds: Annotated[int, Field(gt=0)] | None = None
+    snapshot_window_seconds: Annotated[int, Field(gt=0)] | None = None
+
+    @model_validator(mode="after")
+    def check_kind(self) -> Self:
+        if self.kind == "entities":
+            if (
+                self.retention_seconds is not None
+                or self.viewport_lookback_seconds is not None
+            ):
+                raise ValueError(
+                    "an entity module keeps observations, not events: use "
+                    "observation_retention_seconds instead of retention_seconds "
+                    "or viewport_lookback_seconds"
+                )
+        elif (
+            self.observation_retention_seconds is not None
+            or self.snapshot_window_seconds is not None
+        ):
+            raise ValueError(
+                "observation_retention_seconds and snapshot_window_seconds "
+                "are only for entity modules"
+            )
+        return self
 
     @model_validator(mode="after")
     def check_retention(self) -> Self:

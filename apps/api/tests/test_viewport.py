@@ -105,6 +105,7 @@ class TestViewportRoute:
             "matched": 0,
             "truncated": False,
             "rows": [],
+            "entities": [],
         }
 
     @pytest.mark.parametrize(

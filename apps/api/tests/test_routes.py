@@ -244,6 +244,7 @@ class TestLayers:
             "matched": 0,
             "truncated": False,
             "rows": [],
+            "entities": [],
         }
         assert "last-modified" not in response.headers
 

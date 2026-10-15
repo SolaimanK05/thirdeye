@@ -12,6 +12,7 @@ from thirdeye import store
 from thirdeye.config import Settings, get_settings
 from thirdeye.db import Pool, create_pool
 from thirdeye.logs import configure_logging
+from thirdeye.ontology import EntityReport
 from thirdeye.registry import Module, enabled
 
 log = structlog.get_logger()
@@ -31,6 +32,14 @@ def backoff_delay(failures: int) -> float:
 REDACTED = "[redacted]"
 
 
+class ModuleNotPolled(Exception):
+    pass
+
+
+class EmptyDownload(Exception):
+    pass
+
+
 def scrub(text: str, settings: Settings) -> str:
     for secret in settings.secret_values():
         text = text.replace(secret, REDACTED)
@@ -40,8 +49,16 @@ def scrub(text: str, settings: Settings) -> str:
 async def run_once(
     module: Module, pool: Pool, client: httpx.AsyncClient, settings: Settings
 ) -> int:
+    if module.fetch is None:
+        raise ModuleNotPolled(module.id)
     fetched_at = datetime.now(UTC)
     raw = await module.fetch(client, settings)
+    if module.normalize_entities is not None:
+        reports = module.normalize_entities(raw, fetched_at)
+        if not reports:
+            raise EmptyDownload(f"{module.id} download held no usable records")
+        return await store_entities(module, pool, reports, fetched_at)
+    assert module.normalize is not None
     parsed = module.normalize(raw, fetched_at)
     accept = module.accept
     events = parsed if accept is None else [e for e in parsed if accept(e, settings)]
@@ -66,6 +83,33 @@ async def run_once(
             if removed:
                 log.info("module.pruned", module=module.id, removed=removed)
     return len(events)
+
+
+async def store_entities(
+    module: Module,
+    pool: Pool,
+    reports: Sequence[EntityReport],
+    fetched_at: datetime,
+) -> int:
+    manifest = module.manifest
+    keep = manifest.observation_retention_seconds
+    async with pool.connection() as conn:
+        count = await store.write_entities(
+            conn,
+            module.id,
+            manifest.provenance.source_id,
+            reports,
+            fetched_at,
+            latest_only=keep is None,
+            snapshot_window_seconds=manifest.snapshot_window_seconds,
+        )
+        if keep is not None:
+            removed = await store.prune_observations(
+                conn, manifest.provenance.source_id, keep, fetched_at
+            )
+            if removed:
+                log.info("module.pruned", module=module.id, removed=removed)
+    return count
 
 
 async def report_failure(
@@ -146,16 +190,19 @@ async def run(settings: Settings, *, once: bool) -> int:
     log.info("worker.started", modules=[m.id for m in modules], once=once)
     try:
         async with http_client() as client:
+            polled = []
+            for module in modules:
+                if module.fetch is None or module.manifest.cadence_seconds == 0:
+                    log.info("module.not_polled", module=module.id)
+                    continue
+                polled.append(module)
             if once:
                 results = await asyncio.gather(
-                    *(tick(m, pool, client, settings) for m in modules)
+                    *(tick(m, pool, client, settings) for m in polled)
                 )
                 return 0 if all(results) else 1
             async with asyncio.TaskGroup() as tasks:
-                for module in modules:
-                    if module.manifest.cadence_seconds == 0:
-                        log.info("module.not_polled", module=module.id)
-                        continue
+                for module in polled:
                     tasks.create_task(
                         run_forever(module, pool, client, settings), name=module.id
                     )

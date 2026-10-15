@@ -2,11 +2,15 @@
 
 import {
   keepPreviousData,
+  type MutationOptions,
+  type QueryClient,
+  queryOptions,
   useMutation,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
 import {
+  ApiRequestError,
   api,
   type EntityDetail,
   type EventDetail,
@@ -16,6 +20,7 @@ import {
   unwrap,
   type Watchlist,
 } from "./client";
+import { type StarTarget, withStar } from "./watchlist";
 
 export type LayerQuery = {
   bbox: string;
@@ -24,6 +29,8 @@ export type LayerQuery = {
 };
 
 const SECOND = 1000;
+const MIN_REFRESH_SECONDS = 15;
+const MAX_REFRESH_SECONDS = 3600;
 const MODULES_REFRESH = 30 * SECOND;
 
 export const queryKeys = {
@@ -62,12 +69,19 @@ function params(query: LayerQuery) {
   };
 }
 
+export function refreshSeconds(cadenceSeconds: number): number {
+  return Math.min(
+    Math.max(cadenceSeconds, MIN_REFRESH_SECONDS),
+    MAX_REFRESH_SECONDS,
+  );
+}
+
 export function useLayer(
   moduleId: string,
   cadenceSeconds: number,
   layerQuery: LayerQuery | null = null,
 ) {
-  const refresh = Math.max(cadenceSeconds, 15) * SECOND;
+  const refresh = refreshSeconds(cadenceSeconds) * SECOND;
   return useQuery({
     queryKey: queryKeys.layer(moduleId, layerQuery),
     queryFn: async ({ signal }): Promise<Layer> =>
@@ -101,8 +115,10 @@ export function useEvent(eventId: string | null) {
   });
 }
 
-export function useEntity(entityId: string | null) {
-  return useQuery({
+const ENTITY_RETRIES = 2;
+
+export function entityQueryOptions(entityId: string | null) {
+  return queryOptions({
     queryKey: queryKeys.entity(entityId ?? ""),
     queryFn: async ({ signal }): Promise<EntityDetail> =>
       unwrap(
@@ -113,7 +129,14 @@ export function useEntity(entityId: string | null) {
       ),
     enabled: entityId !== null,
     staleTime: 60 * SECOND,
+    retry: (failures: number, error: Error) =>
+      !(error instanceof ApiRequestError && error.status === 404) &&
+      failures < ENTITY_RETRIES,
   });
+}
+
+export function useEntity(entityId: string | null) {
+  return useQuery(entityQueryOptions(entityId));
 }
 
 export function useWatchlist() {
@@ -126,17 +149,15 @@ export function useWatchlist() {
   });
 }
 
-export function useStarEntity() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async ({
-      entityId,
-      starred,
-    }: {
-      entityId: string;
-      starred: boolean;
-    }) => {
-      const params = { params: { path: { entity_id: entityId } } };
+export type StarVariables = { target: StarTarget; starred: boolean };
+export type StarContext = { previous: Watchlist | undefined };
+
+export function starMutationOptions(
+  queryClient: QueryClient,
+): MutationOptions<void, Error, StarVariables, StarContext> {
+  return {
+    mutationFn: async ({ target, starred }) => {
+      const params = { params: { path: { entity_id: target.id } } };
       const result = starred
         ? await api.PUT("/v1/watchlist/{entity_id}", params)
         : await api.DELETE("/v1/watchlist/{entity_id}", params);
@@ -144,12 +165,30 @@ export function useStarEntity() {
         unwrap({ error: result.error, response: result.response });
       }
     },
+    onMutate: async ({ target, starred }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.watchlist });
+      const previous = queryClient.getQueryData<Watchlist>(queryKeys.watchlist);
+      if (previous) {
+        queryClient.setQueryData<Watchlist>(
+          queryKeys.watchlist,
+          withStar(previous, target, starred, new Date().toISOString()),
+        );
+      }
+      return { previous };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKeys.watchlist, context.previous);
+      }
+    },
     onSettled: () =>
-      Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.watchlist }),
-        queryClient.invalidateQueries({ queryKey: ["search"] }),
-      ]),
-  });
+      queryClient.invalidateQueries({ queryKey: queryKeys.watchlist }),
+  };
+}
+
+export function useStarEntity() {
+  const queryClient = useQueryClient();
+  return useMutation(starMutationOptions(queryClient));
 }
 
 export function useSearch(text: string) {

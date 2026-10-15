@@ -3,35 +3,51 @@
 import { useEffect } from "react";
 import type { ModuleInfo } from "@/api/client";
 import { useLayer, useModules } from "@/api/queries";
-import { MODULE_VIEWS } from "@/modules/registry";
+import { ENTITY_VIEWS, MODULE_VIEWS } from "@/modules/registry";
 import { useFilters } from "@/state/filters";
 import { useLayerCaps } from "@/state/layer-caps";
 import { useSelection } from "@/state/selection";
+import { useStarred } from "@/state/starred";
 import { useViewport } from "@/state/viewport";
 import { useConsole } from "./console-shell";
 import type { MarkerOverlay } from "./marker-overlay";
+import { withStars } from "./markers";
 import { effectiveFilter } from "./rail";
 import { boxParam, clusterFor, queryBox } from "./viewport";
 import { zoomLevelFor } from "./zoom";
 
 type Props = { overlay: MarkerOverlay };
 
+function hasView(module: ModuleInfo): boolean {
+  return module.kind === "entities"
+    ? ENTITY_VIEWS[module.id] !== undefined
+    : MODULE_VIEWS[module.id] !== undefined;
+}
+
 export function LayerMarkers({ overlay }: Props) {
   const { data: modules } = useModules();
+  const { ids: starred } = useStarred();
   const drawable = (modules ?? []).filter(
-    (module) => module.enabled && MODULE_VIEWS[module.id] !== undefined,
+    (module) => module.enabled && hasView(module),
   );
   return drawable.map((module) => (
-    <ModuleMarkers key={module.id} module={module} overlay={overlay} />
+    <ModuleMarkers
+      key={module.id}
+      module={module}
+      overlay={overlay}
+      starred={starred}
+    />
   ));
 }
 
 function ModuleMarkers({
   module,
   overlay,
+  starred,
 }: {
   module: ModuleInfo;
   overlay: MarkerOverlay;
+  starred: ReadonlySet<string>;
 }) {
   const view = useViewport((state) => state.box);
   const box = module.viewport ? queryBox(view) : null;
@@ -57,16 +73,40 @@ function ModuleMarkers({
   const inRange = range !== null && level >= range.min && level <= range.max;
   const stale = module.health.state === "stale";
   const missingKey = module.health.state === "missing_key";
-  const drawing = filter === "all" && !missingKey;
+  const entityView =
+    module.kind === "entities" ? ENTITY_VIEWS[module.id] : undefined;
+  const eventView =
+    module.kind === "events" ? MODULE_VIEWS[module.id] : undefined;
+  const onlyStarred = filter === "starred" && entityView !== undefined;
+  const drawing = (filter === "all" || onlyStarred) && !missingKey;
 
   useEffect(() => {
-    const view = MODULE_VIEWS[module.id];
-    if (!view || !data) {
+    if (entityView && data) {
+      overlay.setLayer(
+        module.id,
+        withStars(
+          entityView.markers(data.entities, { level }),
+          starred,
+          onlyStarred,
+        ),
+        stale,
+      );
+    } else if (eventView && data) {
+      overlay.setLayer(module.id, eventView.markers(data.rows), stale);
+    } else {
       overlay.removeLayer(module.id);
-      return;
     }
-    overlay.setLayer(module.id, view.markers(data.rows), stale);
-  }, [overlay, module.id, data, stale]);
+  }, [
+    overlay,
+    module.id,
+    entityView,
+    eventView,
+    data,
+    stale,
+    level,
+    starred,
+    onlyStarred,
+  ]);
 
   const shown = data?.record_count;
   const matched = data?.matched;

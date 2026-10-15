@@ -33,6 +33,7 @@ class ModuleOut(Out):
     id: str
     name: str
     domain: Domain
+    kind: Literal["events", "entities"]
     enabled: bool
     cadence_seconds: int
     zoom_range: ZoomRange | None
@@ -109,6 +110,7 @@ async def list_modules(
                 id=module.id,
                 name=manifest.name,
                 domain=manifest.domain,
+                kind=manifest.kind,
                 enabled=module.id in enabled,
                 cadence_seconds=manifest.cadence_seconds,
                 zoom_range=(

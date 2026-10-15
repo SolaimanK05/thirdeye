@@ -117,12 +117,14 @@ function watchPointer(widget: CesiumWidget, overlay: MarkerOverlay) {
       const hit = overlay.hitTest(position.x, position.y);
       useSelection.getState().select(
         hit
-          ? {
-              kind: "event",
-              id: hit.marker.id,
-              moduleId: hit.moduleId,
-              cluster: hit.marker.cluster,
-            }
+          ? hit.marker.entity
+            ? { kind: "entity", id: hit.marker.id, moduleId: hit.moduleId }
+            : {
+                kind: "event",
+                id: hit.marker.id,
+                moduleId: hit.moduleId,
+                cluster: hit.marker.cluster,
+              }
           : null,
       );
     },

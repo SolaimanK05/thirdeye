@@ -5,6 +5,7 @@ import {
   Ellipsoid,
   SceneTransforms,
 } from "cesium";
+import { type LabelCandidate, placeLabels } from "./label-layout";
 import { HIT_RADIUS_PX, type Marker } from "./markers";
 
 export type MarkerPalette = {
@@ -39,6 +40,18 @@ const LABEL_HEIGHT = 17;
 const EDGE_MARGIN = 30;
 const FLAME_HEIGHT = 1.3;
 const FLAME_IN_RING = 0.62;
+const TONES: readonly Marker["tone"][] = ["default", "notable", "accent"];
+const NAME_GAP = 4;
+const NAME_PAD_X = 3;
+const NAME_HEIGHT = 15;
+const NAME_LIMIT = 120;
+const NAME_WIDTH_CACHE_MAX = 5000;
+
+type NameLabel = LabelCandidate & {
+  text: string;
+  tone: Marker["tone"];
+  stale: boolean;
+};
 
 function place(marker: Marker): Placed {
   const position = Cartesian3.fromDegrees(marker.lon, marker.lat);
@@ -143,6 +156,15 @@ function flameRingPath(
   flamePath(ctx, x, y, size * FLAME_IN_RING);
 }
 
+function squarePath(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  size: number,
+) {
+  ctx.rect(x - size / 2, y - size / 2, size, size);
+}
+
 function glyphPath(
   ctx: CanvasRenderingContext2D,
   glyph: Marker["glyph"],
@@ -152,6 +174,7 @@ function glyphPath(
 ) {
   if (glyph === "flame") flamePath(ctx, x, y, size);
   else if (glyph === "flame-ring") flameRingPath(ctx, x, y, size);
+  else if (glyph === "square") squarePath(ctx, x, y, size);
   else trianglePath(ctx, x, y, size);
 }
 
@@ -180,6 +203,7 @@ export class MarkerOverlay {
   private readonly report: InViewReport | undefined;
   private counts: Readonly<Record<string, number>> = {};
   private selectedId: string | null = null;
+  private readonly nameWidths = new Map<string, number>();
 
   constructor(
     widget: CesiumWidget,
@@ -249,6 +273,7 @@ export class MarkerOverlay {
     this.removeListener();
     this.layers.clear();
     this.hidden.clear();
+    this.nameWidths.clear();
     this.counts = {};
     this.report?.({});
     this.context()?.clearRect(0, 0, this.canvas.width, this.canvas.height);
@@ -285,6 +310,8 @@ export class MarkerOverlay {
     );
     let selected: { x: number; y: number; marker: Marker } | null = null;
     const counts: Record<string, number> = {};
+    const names: NameLabel[] = [];
+    ctx.font = `${LABEL_FONT_PX}px ${this.palette.font}`;
 
     for (const [moduleId, layer] of this.layers) {
       layer.visible.fill(0);
@@ -313,12 +340,15 @@ export class MarkerOverlay {
         layer.y[i] = screen.y;
         if (marker.id === this.selectedId) {
           selected = { x: screen.x, y: screen.y, marker };
+        } else if (marker.persistentLabel) {
+          names.push(this.nameLabel(ctx, marker, screen.x, screen.y, layer));
         }
       }
       counts[moduleId] = inView;
-      this.drawLayer(ctx, layer, "default");
-      this.drawLayer(ctx, layer, "notable");
+      for (const tone of TONES) this.drawLayer(ctx, layer, tone);
     }
+
+    this.drawNames(ctx, names, selected);
 
     if (!sameCounts(counts, this.counts)) {
       this.counts = counts;
@@ -335,8 +365,7 @@ export class MarkerOverlay {
     tone: Marker["tone"],
   ) {
     ctx.globalAlpha = layer.stale ? STALE_ALPHA : 1;
-    ctx.strokeStyle =
-      tone === "notable" ? this.palette.notable : this.palette.default;
+    ctx.strokeStyle = this.toneColour(tone);
     ctx.lineWidth = LINE_WIDTH;
     ctx.lineJoin = "round";
     ctx.beginPath();
@@ -346,6 +375,72 @@ export class MarkerOverlay {
       glyphPath(ctx, marker.glyph, layer.x[i], layer.y[i], marker.size);
     }
     ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  private toneColour(tone: Marker["tone"]): string {
+    if (tone === "notable") return this.palette.notable;
+    if (tone === "accent") return this.palette.accent;
+    return this.palette.default;
+  }
+
+  private nameWidth(ctx: CanvasRenderingContext2D, text: string): number {
+    const known = this.nameWidths.get(text);
+    if (known !== undefined) return known;
+    if (this.nameWidths.size >= NAME_WIDTH_CACHE_MAX) this.nameWidths.clear();
+    const width = ctx.measureText(text).width;
+    this.nameWidths.set(text, width);
+    return width;
+  }
+
+  private nameLabel(
+    ctx: CanvasRenderingContext2D,
+    marker: Marker,
+    x: number,
+    y: number,
+    layer: Layer,
+  ): NameLabel {
+    return {
+      x: x + marker.size / 2 + NAME_GAP,
+      y: y - NAME_HEIGHT / 2,
+      width: this.nameWidth(ctx, marker.label) + NAME_PAD_X * 2,
+      height: NAME_HEIGHT,
+      priority: (marker.tone === "accent" ? 1000 : 0) + marker.size,
+      text: marker.label,
+      tone: marker.tone,
+      stale: layer.stale,
+    };
+  }
+
+  private drawNames(
+    ctx: CanvasRenderingContext2D,
+    names: readonly NameLabel[],
+    selected: { x: number; y: number; marker: Marker } | null,
+  ) {
+    if (names.length === 0) return;
+    const blocked = selected
+      ? [
+          {
+            x: selected.x - selected.marker.size,
+            y: selected.y - NAME_HEIGHT,
+            width: selected.marker.size * 2 + 220,
+            height: NAME_HEIGHT * 2,
+          },
+        ]
+      : [];
+    ctx.font = `${LABEL_FONT_PX}px ${this.palette.font}`;
+    ctx.textBaseline = "middle";
+    for (const label of placeLabels(names, NAME_LIMIT, blocked)) {
+      ctx.globalAlpha = label.stale ? STALE_ALPHA : 1;
+      ctx.fillStyle = this.palette.plate;
+      ctx.fillRect(label.x, label.y, label.width, label.height);
+      ctx.fillStyle = this.toneColour(label.tone);
+      ctx.fillText(
+        label.text,
+        label.x + NAME_PAD_X,
+        label.y + label.height / 2 + 0.5,
+      );
+    }
     ctx.globalAlpha = 1;
   }
 

@@ -826,6 +826,104 @@
         "enum": ["vessel", "aircraft", "satellite", "facility", "org", "place"],
         "title": "EntityKind"
       },
+      "EntityRow": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/EntityKind"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "lon": {
+            "type": "number",
+            "title": "Lon"
+          },
+          "lat": {
+            "type": "number",
+            "title": "Lat"
+          },
+          "t": {
+            "type": "string",
+            "format": "date-time",
+            "title": "T"
+          },
+          "sog": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sog"
+          },
+          "cog": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cog"
+          },
+          "heading": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heading"
+          },
+          "alt": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alt"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/Confidence"
+          },
+          "attrs": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Attrs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "name",
+          "lon",
+          "lat",
+          "t",
+          "sog",
+          "cog",
+          "heading",
+          "alt",
+          "confidence",
+          "attrs"
+        ],
+        "title": "EntityRow"
+      },
       "ErrorBody": {
         "properties": {
           "error": {
@@ -1140,6 +1238,14 @@
             },
             "type": "array",
             "title": "Rows"
+          },
+          "entities": {
+            "items": {
+              "$ref": "#/components/schemas/EntityRow"
+            },
+            "type": "array",
+            "title": "Entities",
+            "default": []
           }
         },
         "type": "object",
@@ -1165,6 +1271,11 @@
           },
           "domain": {
             "$ref": "#/components/schemas/Domain"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["events", "entities"],
+            "title": "Kind"
           },
           "enabled": {
             "type": "boolean",
@@ -1220,6 +1331,7 @@
           "id",
           "name",
           "domain",
+          "kind",
           "enabled",
           "cadence_seconds",
           "zoom_range",
@@ -1366,6 +1478,17 @@
             "type": "string",
             "title": "Label"
           },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
           "severity": {
             "anyOf": [
               {
@@ -1411,6 +1534,7 @@
           "module_id",
           "category",
           "label",
+          "detail",
           "severity",
           "t",
           "position",

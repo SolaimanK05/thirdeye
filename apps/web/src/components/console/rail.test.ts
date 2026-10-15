@@ -187,6 +187,23 @@ describe("starred", () => {
     });
   });
 
+  test("a star that has not been looked up yet has no age", () => {
+    const [entry] = toStarred(
+      [
+        {
+          entity_id: "a",
+          module_id: "ports",
+          name: "A",
+          position: null,
+          last_seen: null,
+        },
+      ],
+      [{ id: "ports", name: "Ports" }],
+      NOW,
+    );
+    expect(entry).toMatchObject({ age: "no data", tone: "normal" });
+  });
+
   test("toRow takes the starred count from the watchlist", () => {
     const module = moduleInfo("vessels", "AISStream");
     expect(toRow(module, {}, {}, {}, { vessels: 4 }).starredCount).toBe(4);

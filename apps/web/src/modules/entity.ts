@@ -38,12 +38,26 @@ export function entityName(detail: EntityDetail): string {
   return detail.id;
 }
 
+export function entityProvenance(
+  detail: EntityDetail,
+  nowMs: number,
+): Selection["provenance"] {
+  const retrieved = new Date(detail.retrieved_at);
+  return {
+    source: detail.provenance?.source ?? detail.source.id,
+    retrieved: `${formatClock(retrieved)}, ${relativeAge(retrieved, nowMs)}`,
+    reliability: detail.source.reliability,
+    licence: detail.provenance?.licence ?? detail.source.licence,
+  };
+}
+
+export type StarOptions = { starred: boolean; canStar: boolean };
+
 export function entitySelection(
   detail: EntityDetail,
   nowMs: number,
-  options: { starred: boolean; canStar: boolean },
+  options: StarOptions,
 ): Selection {
-  const retrieved = new Date(detail.retrieved_at);
   const lastSeen = new Date(detail.last_seen);
   const fix = detail.last_observation;
   const name = entityName(detail);
@@ -104,12 +118,7 @@ export function entitySelection(
         : []),
       { label: "TRACK", rows: track },
     ],
-    provenance: {
-      source: detail.provenance?.source ?? detail.source.id,
-      retrieved: `${formatClock(retrieved)}, ${relativeAge(retrieved, nowMs)}`,
-      reliability: detail.source.reliability,
-      licence: detail.provenance?.licence ?? detail.source.licence,
-    },
+    provenance: entityProvenance(detail, nowMs),
     limitations: detail.provenance?.limitations ?? [],
   };
 }

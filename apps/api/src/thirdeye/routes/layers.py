@@ -131,7 +131,19 @@ async def get_layer(
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, f"Module {module_id!r} is not enabled"
         )
-    if module.manifest.viewport_lookback_seconds is None:
+    if module.manifest.kind == "entities":
+        if cell is not None or min_severity is not None:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Module {module_id!r} does not take cell or min_severity",
+            )
+        view = (
+            None
+            if bbox is None and limit is None
+            else parse_viewport(bbox, limit or MAX_LIMIT, None, None)
+        )
+        layer = await cache.get_entities(module_id, view)
+    elif module.manifest.viewport_lookback_seconds is None:
         if any(value is not None for value in (bbox, limit, cell, min_severity)):
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,

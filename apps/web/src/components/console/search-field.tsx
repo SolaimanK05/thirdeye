@@ -4,8 +4,9 @@ import { Autocomplete } from "@base-ui/react/autocomplete";
 import { Star } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { SearchHit } from "@/api/client";
-import { MIN_SEARCH_LENGTH, useSearch } from "@/api/queries";
+import { MIN_SEARCH_LENGTH, useModules, useSearch } from "@/api/queries";
 import { useSelection } from "@/state/selection";
+import { useStarred } from "@/state/starred";
 import { cx } from "./cx";
 import { isPlainKey } from "./hotkeys";
 import { useDebounced } from "./use-debounced";
@@ -28,9 +29,12 @@ export function searchStatus({
   if (text.length < MIN_SEARCH_LENGTH) return null;
   if (!settled || pending) return "Searching…";
   if (failed) return "Search unavailable. Is the API running?";
-  if (count === 0) return `Nothing matches "${text}".`;
-  return `${count} result${count === 1 ? "" : "s"}`;
+  if (count === 0) return EMPTY_TEXT;
+  return `${count} ${count === 1 ? "match" : "matches"} across modules`;
 }
+
+export const EMPTY_TEXT =
+  "No match in enabled modules. Names, IMO, MMSI, ICAO24, callsign and place are searched.";
 
 function hitKey(hit: SearchHit): string {
   return `${hit.kind}:${hit.id}`;
@@ -54,6 +58,11 @@ export function SearchField({
   const anchor = useRef<HTMLDivElement>(null);
   const select = useSelection((state) => state.select);
   const focusOn = useSelection((state) => state.focusOn);
+  const stars = useStarred();
+  const modules = useModules();
+  const moduleNames = new Map(
+    (modules.data ?? []).map((module) => [module.id, module.name]),
+  );
 
   const trimmed = text.trim();
   const settled = useDebounced(trimmed, DEBOUNCE_MS);
@@ -93,6 +102,7 @@ export function SearchField({
         : { kind: "entity", id: hit.id, moduleId: hit.module_id },
     );
     if (hit.position) focusOn(hit.position);
+    input.current?.blur();
     onPick?.();
   };
 
@@ -104,6 +114,7 @@ export function SearchField({
       itemToStringValue={(hit) => hit.label}
       filter={null}
       mode="none"
+      autoHighlight
     >
       <div
         ref={anchor}
@@ -159,28 +170,59 @@ export function SearchField({
               )}
             </Autocomplete.Status>
             <Autocomplete.List className="max-h-[60dvh] overflow-y-auto">
-              {(hit: SearchHit) => (
-                <Autocomplete.Item
-                  key={hitKey(hit)}
-                  value={hit}
-                  onClick={() => pick(hit)}
-                  className="grid min-h-11 cursor-default grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 border-line border-b px-3 py-1.5 text-ink outline-none last:border-b-0 data-highlighted:bg-well"
-                >
-                  <span className="flex min-w-0 flex-col">
-                    <span className="truncate">{hit.label}</span>
-                    <span className="truncate text-ink-3 text-label tracking-normal">
-                      {hit.module_id} · {hit.category.replaceAll("-", " ")}
+              {(hit: SearchHit) => {
+                const starred =
+                  hit.kind === "entity" && stars.ready
+                    ? stars.isStarred(hit.id)
+                    : hit.starred;
+                return (
+                  <Autocomplete.Item
+                    key={hitKey(hit)}
+                    value={hit}
+                    onClick={() => pick(hit)}
+                    className="grid min-h-11 cursor-default grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 border-line border-b px-3 py-1.5 text-ink outline-none last:border-b-0 data-highlighted:bg-well"
+                  >
+                    <span className="flex min-w-0 flex-col">
+                      <span className="truncate">{hit.label}</span>
+                      <span className="truncate text-ink-3 text-label tracking-normal">
+                        {hit.detail ?? hit.category.replaceAll("-", " ")}
+                      </span>
                     </span>
-                  </span>
-                  {hit.starred && (
-                    <span className="text-amber">
-                      <Star size={13} fill="currentColor" aria-hidden="true" />
-                      <span className="sr-only">Starred</span>
+                    <span className="flex items-center gap-2">
+                      {starred && (
+                        <span className="text-amber">
+                          <Star
+                            size={13}
+                            fill="currentColor"
+                            aria-hidden="true"
+                          />
+                          <span className="sr-only">Starred</span>
+                        </span>
+                      )}
+                      <span className="border border-line-2 px-1 text-ink-3 text-micro uppercase tracking-normal">
+                        {moduleNames.get(hit.module_id) ?? hit.module_id}
+                      </span>
                     </span>
-                  )}
-                </Autocomplete.Item>
-              )}
+                  </Autocomplete.Item>
+                );
+              }}
             </Autocomplete.List>
+            {hits.length > 0 && (
+              <p className="flex flex-wrap items-center gap-x-4 gap-y-1 border-line border-t px-3 py-2 text-ink-3 text-label tracking-normal">
+                <span className="flex items-center gap-1.5">
+                  <kbd className="border border-line-2 px-1.5">Enter</kbd>
+                  select
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="flex gap-0.5">
+                    <kbd className="border border-line-2 px-1.5">↑</kbd>
+                    <kbd className="border border-line-2 px-1.5">↓</kbd>
+                  </span>
+                  move
+                </span>
+                <span>Results are tagged by source module</span>
+              </p>
+            )}
           </Autocomplete.Popup>
         </Autocomplete.Positioner>
       </Autocomplete.Portal>
