@@ -89,6 +89,58 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/watchlist": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Watchlist */
+    get: operations["get_watchlist_v1_watchlist_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/watchlist/{entity_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /** Star */
+    put: operations["star_v1_watchlist__entity_id__put"];
+    post?: never;
+    /** Unstar */
+    delete: operations["unstar_v1_watchlist__entity_id__delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/search": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Search */
+    get: operations["search_v1_search_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -339,6 +391,36 @@ export interface components {
       /** Limitations */
       limitations: string[];
     };
+    /** SearchHit */
+    SearchHit: {
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: "event" | "entity";
+      /** Id */
+      id: string;
+      /** Module Id */
+      module_id: string;
+      /** Category */
+      category: string;
+      /** Label */
+      label: string;
+      /** Severity */
+      severity: number | null;
+      /** T */
+      t: string | null;
+      position: components["schemas"]["Position"] | null;
+      /** Starred */
+      starred: boolean;
+    };
+    /** SearchResults */
+    SearchResults: {
+      /** Query */
+      query: string;
+      /** Results */
+      results: components["schemas"]["SearchHit"][];
+    };
     /** SourceOut */
     SourceOut: {
       /** Id */
@@ -354,6 +436,37 @@ export interface components {
      * @enum {string}
      */
     SourceReliability: "primary" | "aggregated" | "derived";
+    /** WatchItem */
+    WatchItem: {
+      /**
+       * Entity Id
+       * Format: uuid
+       */
+      entity_id: string;
+      /** Name */
+      name: string;
+      kind: components["schemas"]["EntityKind"];
+      /** Module Id */
+      module_id: string;
+      /**
+       * Added At
+       * Format: date-time
+       */
+      added_at: string;
+      /**
+       * Last Seen
+       * Format: date-time
+       */
+      last_seen: string;
+      position: components["schemas"]["Position"] | null;
+    };
+    /** Watchlist */
+    Watchlist: {
+      /** Writable */
+      writable: boolean;
+      /** Items */
+      items: components["schemas"]["WatchItem"][];
+    };
     /** ZoomRange */
     ZoomRange: {
       /** Min */
@@ -386,6 +499,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["Health"];
+        };
+      };
+      /** @description Not allowed */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
         };
       };
       /** @description Not found */
@@ -433,6 +555,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ModuleOut"][];
+        };
+      };
+      /** @description Not allowed */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
         };
       };
       /** @description Not found */
@@ -503,6 +634,15 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description Not allowed */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
+        };
+      };
       /** @description Not found */
       404: {
         headers: {
@@ -552,6 +692,15 @@ export interface operations {
           "application/json": components["schemas"]["EventDetail"];
         };
       };
+      /** @description Not allowed */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
+        };
+      };
       /** @description Not found */
       404: {
         headers: {
@@ -599,6 +748,243 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["EntityDetail"];
+        };
+      };
+      /** @description Not allowed */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
+        };
+      };
+      /** @description Invalid request */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
+        };
+      };
+      /** @description Database unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
+        };
+      };
+    };
+  };
+  get_watchlist_v1_watchlist_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Watchlist"];
+        };
+      };
+      /** @description Not allowed */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
+        };
+      };
+      /** @description Invalid request */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
+        };
+      };
+      /** @description Database unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
+        };
+      };
+    };
+  };
+  star_v1_watchlist__entity_id__put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        entity_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Not allowed */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
+        };
+      };
+      /** @description Invalid request */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
+        };
+      };
+      /** @description Database unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
+        };
+      };
+    };
+  };
+  unstar_v1_watchlist__entity_id__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        entity_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Not allowed */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
+        };
+      };
+      /** @description Invalid request */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
+        };
+      };
+      /** @description Database unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
+        };
+      };
+    };
+  };
+  search_v1_search_get: {
+    parameters: {
+      query: {
+        /** @description Text to look for */
+        q: string;
+        limit?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SearchResults"];
+        };
+      };
+      /** @description Not allowed */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
         };
       };
       /** @description Not found */

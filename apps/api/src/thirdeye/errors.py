@@ -24,6 +24,7 @@ class ErrorBody(BaseModel):
 
 
 ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    status.HTTP_403_FORBIDDEN: {"model": ErrorBody, "description": "Not allowed"},
     status.HTTP_404_NOT_FOUND: {"model": ErrorBody, "description": "Not found"},
     status.HTTP_422_UNPROCESSABLE_CONTENT: {
         "model": ErrorBody,

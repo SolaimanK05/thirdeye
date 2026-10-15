@@ -1,6 +1,14 @@
 import { describe, expect, test } from "vitest";
+import type { WatchItem } from "@/api/client";
 import { moduleInfo } from "@/api/test-data";
-import { buildDomains, effectiveFilter, toRow } from "./rail";
+import {
+  buildDomains,
+  countStarred,
+  effectiveFilter,
+  starredTone,
+  toRow,
+  toStarred,
+} from "./rail";
 
 const quakes = moduleInfo("earthquakes", "USGS", { name: "Earthquakes" });
 
@@ -124,5 +132,64 @@ describe("buildDomains", () => {
 
   test("nothing enabled gives no groups", () => {
     expect(buildDomains([], {}, {})).toEqual([]);
+  });
+});
+
+describe("starred", () => {
+  const item = (id: string, moduleId: string, lastSeen: string): WatchItem => ({
+    entity_id: id,
+    name: id.toUpperCase(),
+    kind: "vessel",
+    module_id: moduleId,
+    added_at: "2026-10-14T00:00:00Z",
+    last_seen: lastSeen,
+    position: null,
+  });
+  const NOW = Date.parse("2026-10-14T06:00:00Z");
+
+  test("counts per module", () => {
+    expect(
+      countStarred([
+        item("a", "vessels", "2026-10-14T05:59:00Z"),
+        item("b", "vessels", "2026-10-14T05:59:00Z"),
+        item("c", "aircraft", "2026-10-14T05:59:00Z"),
+      ]),
+    ).toEqual({ vessels: 2, aircraft: 1 });
+    expect(countStarred([])).toEqual({});
+  });
+
+  test("tone follows how long ago the entity was last seen", () => {
+    expect(starredTone(59 * 60_000)).toBe("normal");
+    expect(starredTone(60 * 60_000)).toBe("stale");
+    expect(starredTone(24 * 60 * 60_000)).toBe("gap");
+  });
+
+  test("maps watchlist items to rail entries", () => {
+    const [recent, old] = toStarred(
+      [
+        item("a", "vessels", "2026-10-14T05:50:00Z"),
+        item("b", "mystery", "2026-10-12T06:00:00Z"),
+      ],
+      [{ id: "vessels", name: "Vessels" }],
+      NOW,
+    );
+    expect(recent).toMatchObject({
+      id: "a",
+      moduleId: "vessels",
+      module: "Vessels",
+      age: "10 min ago",
+      tone: "normal",
+    });
+    expect(old).toMatchObject({
+      module: "mystery",
+      age: "2 d ago",
+      tone: "gap",
+    });
+  });
+
+  test("toRow takes the starred count from the watchlist", () => {
+    const module = moduleInfo("vessels", "AISStream");
+    expect(toRow(module, {}, {}, {}, { vessels: 4 }).starredCount).toBe(4);
+    expect(toRow(module, {}, {}).starredCount).toBe(0);
   });
 });

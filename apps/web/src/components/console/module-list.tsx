@@ -1,6 +1,5 @@
 "use client";
 
-import { Star } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useFilters } from "@/state/filters";
 import { useConsole } from "./console-shell";
@@ -8,6 +7,8 @@ import { formatCount } from "./count";
 import { cx } from "./cx";
 import { Disclosure } from "./disclosure";
 import { type FilterChoice, FilterMenu } from "./filter-menu";
+import { isTyping } from "./hotkeys";
+import { StarredSection } from "./starred-section";
 import {
   drawsAnything,
   everyModuleFilter,
@@ -18,13 +19,7 @@ import {
   moduleNote,
   railCounts,
 } from "./status";
-import type {
-  DomainGroup,
-  Filter,
-  ModuleRow,
-  StarredEntity,
-  ZoomLevel,
-} from "./types";
+import type { DomainGroup, Filter, ModuleRow, ZoomLevel } from "./types";
 import { useRail } from "./use-rail";
 import { zoomLevelFor } from "./zoom";
 
@@ -34,14 +29,6 @@ const NOTE_TONE: Record<ModuleNote["tone"], string> = {
   red: "text-red",
   amber: "text-amber",
 };
-
-const AGE_TONE: Record<StarredEntity["tone"], string> = {
-  normal: "text-ink-2",
-  stale: "text-amber",
-  gap: "text-red",
-};
-
-const NO_STARRED: readonly StarredEntity[] = [];
 
 const SKELETON_ROWS = ["a", "b", "c"] as const;
 
@@ -93,16 +80,6 @@ function everyChoices(rows: readonly ModuleRow[]): FilterChoice[] {
       count: count("none"),
     },
   ];
-}
-
-function isTyping(target: EventTarget | null): boolean {
-  return (
-    target instanceof HTMLElement &&
-    (target.isContentEditable ||
-      target.tagName === "INPUT" ||
-      target.tagName === "TEXTAREA" ||
-      target.tagName === "SELECT")
-  );
 }
 
 function EveryModuleFilter({ domains }: { domains: readonly DomainGroup[] }) {
@@ -195,7 +172,6 @@ export function ModuleList() {
   const { zoomPercent } = useConsole();
   const zoom = zoomLevelFor(zoomPercent).level;
   const { status, domains } = useRail();
-  const starred = NO_STARRED;
   const { on, drawn } = railCounts(domains, zoom);
 
   return (
@@ -253,49 +229,7 @@ export function ModuleList() {
         ))}
       </Disclosure>
 
-      <Disclosure
-        title={
-          <span className="flex items-center gap-1.5 text-amber">
-            <Star size={13} aria-hidden="true" />
-            <span className="sr-only">Starred</span>
-            <span className="tabular-nums">{starred.length}</span>
-          </span>
-        }
-        className="border-line border-b pb-3"
-        summaryClassName="px-3"
-      >
-        {starred.length === 0 ? (
-          <p className="px-3 text-ink-3 text-secondary">
-            None yet. Select something, press s.
-          </p>
-        ) : (
-          <ul>
-            {starred.map((entity) => (
-              <li key={entity.id}>
-                <button
-                  type="button"
-                  className="grid min-h-11 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 py-1 text-left transition-colors duration-120 ease-out hover-fine:bg-well"
-                >
-                  <span className="flex min-w-0 flex-col">
-                    <span className="truncate text-ink">{entity.name}</span>
-                    <span className="text-ink-3 text-label tracking-normal">
-                      {entity.module}
-                    </span>
-                  </span>
-                  <span
-                    className={cx(
-                      "text-label tracking-normal tabular-nums",
-                      AGE_TONE[entity.tone],
-                    )}
-                  >
-                    {entity.age}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Disclosure>
+      <StarredSection />
     </>
   );
 }

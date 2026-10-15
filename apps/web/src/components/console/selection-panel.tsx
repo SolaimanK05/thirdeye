@@ -93,11 +93,17 @@ export function SelectionDetails({
                   aria-keyshortcuts={key}
                   title={label(selection.starred)}
                   className={cx(
-                    "flex min-h-9 min-w-9 items-center justify-center gap-1.5 border border-line-2 px-2 text-ink transition-colors duration-120 ease-out hover-fine:text-accent",
-                    action === "star" && selection.starred && "text-amber",
+                    "flex min-h-9 min-w-9 items-center justify-center gap-1.5 border border-line-2 px-2 transition-colors duration-120 ease-out hover-fine:text-accent",
+                    action === "star" && selection.starred
+                      ? "text-amber"
+                      : "text-ink",
                   )}
                 >
-                  {icon}
+                  {action === "star" && selection.starred ? (
+                    <Star size={15} fill="currentColor" aria-hidden="true" />
+                  ) : (
+                    icon
+                  )}
                   {key && (
                     <span
                       aria-hidden="true"

@@ -437,7 +437,6 @@ describe("client boundary", () => {
       "header.tsx",
       "module-rail.tsx",
       "rail.ts",
-      "search-field.tsx",
       "selection-panel.tsx",
     ];
     for (const file of serverOnly) {
@@ -467,9 +466,11 @@ describe("client boundary", () => {
       "module-list.tsx",
       "module-status-lines.tsx",
       "modules-drawer.tsx",
+      "search-field.tsx",
       "selection-dock.tsx",
       "selection-live.tsx",
       "sidebar-toggle.tsx",
+      "starred-section.tsx",
       "use-now.ts",
       "use-rail.ts",
       "zoom-control.tsx",

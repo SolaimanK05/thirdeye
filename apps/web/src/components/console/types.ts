@@ -33,7 +33,9 @@ export type DomainGroup = {
 export type StarredEntity = {
   id: string;
   name: string;
+  moduleId: string;
   module: string;
+  position: LatLon | null;
   age: string;
   tone: "normal" | "stale" | "gap";
 };

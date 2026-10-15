@@ -1,5 +1,5 @@
 import os
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -16,15 +16,17 @@ from thirdeye import store
 from thirdeye.app import create_app
 from thirdeye.config import Settings
 from thirdeye.db import Pool, get_pool
-from thirdeye.deps import get_layer_cache, get_reader
+from thirdeye.deps import get_layer_cache, get_reader, get_writer
 from thirdeye.layers import LayerCache, ViewLoader
 from thirdeye.reads import (
     EntityRecord,
     EventRecord,
     HealthRecord,
+    SearchRecord,
     SnapshotRecord,
     Viewport,
     ViewRecord,
+    WatchRecord,
 )
 from thirdeye.registry import REGISTRY, Module
 
@@ -58,6 +60,11 @@ class FakeReader:
     view_rows: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     view_fetched_at: dict[str, datetime] = field(default_factory=dict)
     window_calls: list[tuple[str, int, Viewport]] = field(default_factory=list)
+    watch_records: list[WatchRecord] = field(default_factory=list)
+    search_records: list[SearchRecord] = field(default_factory=list)
+    search_calls: list[tuple[str, list[str], list[str], int]] = field(
+        default_factory=list
+    )
 
     def check(self) -> None:
         if not self.healthy:
@@ -91,6 +98,21 @@ class FakeReader:
             rows=inside[: viewport.limit], matched=len(inside), fetched_at=fetched_at
         )
 
+    async def watchlist(self) -> list[WatchRecord]:
+        self.check()
+        return list(self.watch_records)
+
+    async def search(
+        self,
+        text: str,
+        modules: Sequence[str],
+        named_modules: Sequence[str],
+        limit: int,
+    ) -> list[SearchRecord]:
+        self.check()
+        self.search_calls.append((text, list(modules), list(named_modules), limit))
+        return self.search_records[:limit]
+
     async def health(self) -> dict[str, HealthRecord]:
         self.check()
         return self.health_rows
@@ -102,6 +124,26 @@ class FakeReader:
     async def entity(self, entity_id: UUID) -> EntityRecord | None:
         self.check()
         return self.entities.get(entity_id)
+
+
+@dataclass
+class FakeWriter:
+    known: set[UUID] = field(default_factory=set)
+    starred: set[UUID] = field(default_factory=set)
+
+    async def star(self, entity_id: UUID) -> bool:
+        if entity_id not in self.known:
+            return False
+        self.starred.add(entity_id)
+        return True
+
+    async def unstar(self, entity_id: UUID) -> None:
+        self.starred.discard(entity_id)
+
+
+@pytest.fixture
+def writer() -> FakeWriter:
+    return FakeWriter()
 
 
 def view_loader_for(reader: FakeReader, registry: Mapping[str, Module]) -> ViewLoader:
@@ -127,13 +169,16 @@ def reader() -> FakeReader:
 
 
 @pytest.fixture
-def make_client(settings: Settings, reader: FakeReader) -> Callable[[bool], TestClient]:
+def make_client(
+    settings: Settings, reader: FakeReader, writer: FakeWriter
+) -> Callable[[bool], TestClient]:
     def factory(db_healthy: bool = True) -> TestClient:
         app = create_app(settings)
         reader.healthy = db_healthy
         cache = LayerCache(reader.snapshot, view_loader_for(reader, REGISTRY))
         app.dependency_overrides[get_pool] = lambda: FakePool(db_healthy)
         app.dependency_overrides[get_reader] = lambda: reader
+        app.dependency_overrides[get_writer] = lambda: writer
         app.dependency_overrides[get_layer_cache] = lambda: cache
         return TestClient(app)
 
@@ -142,13 +187,14 @@ def make_client(settings: Settings, reader: FakeReader) -> Callable[[bool], Test
 
 @pytest.fixture
 def make_registry_client(
-    reader: FakeReader,
+    reader: FakeReader, writer: FakeWriter
 ) -> Callable[[Settings, Mapping[str, Module]], TestClient]:
     def factory(settings: Settings, registry: Mapping[str, Module]) -> TestClient:
         app = create_app(settings, registry)
         cache = LayerCache(reader.snapshot, view_loader_for(reader, registry))
         app.dependency_overrides[get_pool] = lambda: FakePool(True)
         app.dependency_overrides[get_reader] = lambda: reader
+        app.dependency_overrides[get_writer] = lambda: writer
         app.dependency_overrides[get_layer_cache] = lambda: cache
         return TestClient(app)
 

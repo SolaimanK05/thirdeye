@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal, Protocol
@@ -8,6 +9,10 @@ from psycopg.rows import TupleRow, class_row
 from pydantic import BaseModel, ConfigDict, JsonValue
 
 from thirdeye.ontology import Confidence, EntityKind, SourceReliability
+
+
+def escape_like(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 class Record(BaseModel):
@@ -45,6 +50,31 @@ class ViewRecord(Record):
     rows: list[dict[str, JsonValue]]
     matched: int
     fetched_at: datetime
+
+
+class WatchRecord(Record):
+    entity_id: UUID
+    kind: EntityKind
+    names: list[str]
+    identifiers: dict[str, JsonValue]
+    module_id: str
+    added_at: datetime
+    last_seen: datetime
+    lon: float | None
+    lat: float | None
+
+
+class SearchRecord(Record):
+    kind: Literal["event", "entity"]
+    id: str
+    module_id: str
+    category: str
+    label: str | None
+    severity: float | None
+    t: datetime | None
+    lon: float | None
+    lat: float | None
+    starred: bool
 
 
 class HealthRecord(Record):
@@ -172,6 +202,72 @@ from (
 order by m.total desc, m.id
 """
 
+WATCHLIST = """
+select
+    w.entity_id, e.kind::text as kind, e.names, e.identifiers,
+    s.module_id, w.added_at, e.last_seen, o.lon, o.lat
+from watchlist_entry w
+join entity e on e.id = w.entity_id
+join source s on s.id = e.source_id
+left join lateral (
+    select st_x(geom) as lon, st_y(geom) as lat
+    from observation
+    where entity_id = e.id
+    order by t desc
+    limit 1
+) o on true
+order by w.added_at desc, e.id
+"""
+
+SEARCH_EVENTS = """
+select
+    'event' as kind, e.id, e.module_id, e.category,
+    e.attrs ->> 'place' as label, e.severity, e.t_start as t,
+    st_x(st_pointonsurface(e.geom)) as lon,
+    st_y(st_pointonsurface(e.geom)) as lat,
+    false as starred
+from layer_snapshot s
+join event e on e.module_id = s.module_id and e.retrieved_at = s.fetched_at
+where s.module_id = any(%(modules)s)
+  and (
+      e.module_id = any(%(named)s)
+      or (e.attrs ->> 'place') ilike %(pattern)s escape '\\'
+      or replace(e.category, '-', ' ') ilike %(pattern)s escape '\\'
+  )
+order by
+    coalesce((e.attrs ->> 'place') ilike %(pattern)s escape '\\', false) desc,
+    e.severity desc nulls last, e.t_start desc, e.id
+limit %(limit)s
+"""
+
+SEARCH_ENTITIES = """
+select
+    'entity' as kind, e.id::text as id, s.module_id, e.kind::text as category,
+    coalesce(
+        e.names[1],
+        (select value from jsonb_each_text(e.identifiers) limit 1)
+    ) as label,
+    null::double precision as severity, e.last_seen as t,
+    o.lon, o.lat, (w.entity_id is not null) as starred
+from entity e
+join source s on s.id = e.source_id
+left join watchlist_entry w on w.entity_id = e.id
+left join lateral (
+    select st_x(geom) as lon, st_y(geom) as lat
+    from observation
+    where entity_id = e.id
+    order by t desc
+    limit 1
+) o on true
+where s.module_id = any(%(modules)s)
+  and public.entity_search_text(e.names, e.identifiers)
+      ilike %(pattern)s escape '\\'
+order by
+    (lower(coalesce(e.names[1], '')) like %(prefix)s escape '\\') desc,
+    (w.entity_id is not null) desc, e.last_seen desc, e.id
+limit %(limit)s
+"""
+
 VIEW_FETCHED_AT = """
 select fetched_at from layer_snapshot where module_id = %s
 """
@@ -228,6 +324,16 @@ class Reader(Protocol):
     ) -> ViewRecord | None: ...
 
     async def health(self) -> dict[str, HealthRecord]: ...
+
+    async def watchlist(self) -> list[WatchRecord]: ...
+
+    async def search(
+        self,
+        text: str,
+        modules: Sequence[str],
+        named_modules: Sequence[str],
+        limit: int,
+    ) -> list[SearchRecord]: ...
 
     async def event(self, event_id: str) -> EventRecord | None: ...
 
@@ -295,6 +401,33 @@ class DbReader:
         if row is None:
             return None
         return ViewRecord(rows=[], matched=0, fetched_at=row[0])
+
+    async def watchlist(self) -> list[WatchRecord]:
+        async with self.conn.cursor(row_factory=class_row(WatchRecord)) as cur:
+            await cur.execute(WATCHLIST)
+            return await cur.fetchall()
+
+    async def search(
+        self,
+        text: str,
+        modules: Sequence[str],
+        named_modules: Sequence[str],
+        limit: int,
+    ) -> list[SearchRecord]:
+        escaped = escape_like(text.strip().lower())
+        params = {
+            "modules": list(modules),
+            "named": list(named_modules),
+            "pattern": f"%{escaped}%",
+            "prefix": f"{escaped}%",
+            "limit": limit,
+        }
+        async with self.conn.cursor(row_factory=class_row(SearchRecord)) as cur:
+            await cur.execute(SEARCH_ENTITIES, params)
+            entities = await cur.fetchall()
+            await cur.execute(SEARCH_EVENTS, params)
+            events = await cur.fetchall()
+        return [*entities, *events][:limit]
 
     async def health(self) -> dict[str, HealthRecord]:
         async with self.conn.cursor(row_factory=class_row(HealthRecord)) as cur:

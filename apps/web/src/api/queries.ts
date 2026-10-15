@@ -1,12 +1,20 @@
 "use client";
 
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import {
   api,
+  type EntityDetail,
   type EventDetail,
   type Layer,
   type ModuleInfo,
+  type SearchResults,
   unwrap,
+  type Watchlist,
 } from "./client";
 
 export type LayerQuery = {
@@ -29,7 +37,12 @@ export const queryKeys = {
       query?.minSeverity ?? null,
     ] as const,
   event: (eventId: string) => ["event", eventId] as const,
+  entity: (entityId: string) => ["entity", entityId] as const,
+  watchlist: ["watchlist"] as const,
+  search: (text: string) => ["search", text] as const,
 };
+
+export const MIN_SEARCH_LENGTH = 2;
 
 export function useModules() {
   return useQuery({
@@ -85,5 +98,68 @@ export function useEvent(eventId: string | null) {
       ),
     enabled: eventId !== null,
     staleTime: 60 * SECOND,
+  });
+}
+
+export function useEntity(entityId: string | null) {
+  return useQuery({
+    queryKey: queryKeys.entity(entityId ?? ""),
+    queryFn: async ({ signal }): Promise<EntityDetail> =>
+      unwrap(
+        await api.GET("/v1/entities/{entity_id}", {
+          params: { path: { entity_id: entityId ?? "" } },
+          signal,
+        }),
+      ),
+    enabled: entityId !== null,
+    staleTime: 60 * SECOND,
+  });
+}
+
+export function useWatchlist() {
+  return useQuery({
+    queryKey: queryKeys.watchlist,
+    queryFn: async ({ signal }): Promise<Watchlist> =>
+      unwrap(await api.GET("/v1/watchlist", { signal })),
+    staleTime: MODULES_REFRESH,
+    refetchInterval: MODULES_REFRESH,
+  });
+}
+
+export function useStarEntity() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      entityId,
+      starred,
+    }: {
+      entityId: string;
+      starred: boolean;
+    }) => {
+      const params = { params: { path: { entity_id: entityId } } };
+      const result = starred
+        ? await api.PUT("/v1/watchlist/{entity_id}", params)
+        : await api.DELETE("/v1/watchlist/{entity_id}", params);
+      if (!result.response.ok) {
+        unwrap({ error: result.error, response: result.response });
+      }
+    },
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.watchlist }),
+        queryClient.invalidateQueries({ queryKey: ["search"] }),
+      ]),
+  });
+}
+
+export function useSearch(text: string) {
+  return useQuery({
+    queryKey: queryKeys.search(text),
+    queryFn: async ({ signal }): Promise<SearchResults> =>
+      unwrap(
+        await api.GET("/v1/search", { params: { query: { q: text } }, signal }),
+      ),
+    enabled: text.length >= MIN_SEARCH_LENGTH,
+    staleTime: 15 * SECOND,
   });
 }

@@ -1,8 +1,14 @@
-import type { ModuleInfo } from "@/api/client";
+import type { ModuleInfo, WatchItem } from "@/api/client";
 import type { LayerCap } from "@/state/layer-caps";
 import { HEALTH_FROM_API } from "./module-status";
-import { formatClock } from "./time";
-import type { DomainGroup, Filter, ModuleRow, ZoomLevel } from "./types";
+import { formatClock, relativeAge } from "./time";
+import type {
+  DomainGroup,
+  Filter,
+  ModuleRow,
+  StarredEntity,
+  ZoomLevel,
+} from "./types";
 
 type Domain = ModuleInfo["domain"];
 
@@ -32,6 +38,7 @@ export function toRow(
   chosen: Readonly<Record<string, Filter>>,
   inView: Readonly<Record<string, number>>,
   capped: Readonly<Record<string, LayerCap>> = {},
+  starred: Readonly<Record<string, number>> = {},
 ): ModuleRow {
   const { zoom_range: range, health } = module;
   return {
@@ -41,7 +48,7 @@ export function toRow(
     zoomRange: range ? [toLevel(range.min, 1), toLevel(range.max, 4)] : null,
     filter: effectiveFilter(chosen, module),
     loaded: health.record_count,
-    starredCount: 0,
+    starredCount: starred[module.id] ?? 0,
     inView: inView[module.id],
     capped: capped[module.id],
     missingKey: module.key_env ?? undefined,
@@ -52,21 +59,61 @@ export function toRow(
   };
 }
 
+export function countStarred(
+  items: readonly { module_id: string }[],
+): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const item of items) {
+    counts[item.module_id] = (counts[item.module_id] ?? 0) + 1;
+  }
+  return counts;
+}
+
 export function buildDomains(
   modules: readonly ModuleInfo[],
   chosen: Readonly<Record<string, Filter>>,
   inView: Readonly<Record<string, number>>,
   capped: Readonly<Record<string, LayerCap>> = {},
+  starred: Readonly<Record<string, number>> = {},
 ): DomainGroup[] {
   const groups = new Map<Domain, ModuleRow[]>();
   for (const module of modules) {
     if (!module.enabled) continue;
     const rows = groups.get(module.domain) ?? [];
-    rows.push(toRow(module, chosen, inView, capped));
+    rows.push(toRow(module, chosen, inView, capped, starred));
     groups.set(module.domain, rows);
   }
   return [...groups].map(([domain, rows]) => ({
     label: DOMAIN_LABEL[domain],
     modules: rows,
   }));
+}
+
+const HOUR_MS = 3_600_000;
+const DAY_MS = 24 * HOUR_MS;
+
+export function starredTone(ageMs: number): StarredEntity["tone"] {
+  if (ageMs >= DAY_MS) return "gap";
+  if (ageMs >= HOUR_MS) return "stale";
+  return "normal";
+}
+
+export function toStarred(
+  items: readonly WatchItem[],
+  modules: readonly Pick<ModuleInfo, "id" | "name">[],
+  nowMs: number,
+): StarredEntity[] {
+  const names = new Map(modules.map((module) => [module.id, module.name]));
+  return items.map((item) => {
+    const seen = new Date(item.last_seen);
+    return {
+      id: item.entity_id,
+      name: item.name,
+      moduleId: item.module_id,
+      module: names.get(item.module_id) ?? item.module_id,
+      position: item.position,
+      age: relativeAge(seen, nowMs),
+      tone: starredTone(Math.max(0, nowMs - seen.getTime())),
+    };
+  });
 }

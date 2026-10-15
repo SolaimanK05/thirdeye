@@ -7,6 +7,11 @@ export type HealthState = ApiSchemas["HealthState"];
 export type Layer = ApiSchemas["Layer"];
 export type EventRow = ApiSchemas["EventRow"];
 export type EventDetail = ApiSchemas["EventDetail"];
+export type EntityDetail = ApiSchemas["EntityDetail"];
+export type Watchlist = ApiSchemas["Watchlist"];
+export type WatchItem = ApiSchemas["WatchItem"];
+export type SearchHit = ApiSchemas["SearchHit"];
+export type SearchResults = ApiSchemas["SearchResults"];
 export type ApiError = ApiSchemas["ErrorBody"];
 
 export const API_URL =

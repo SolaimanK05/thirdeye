@@ -28,7 +28,7 @@ export function Header({ instance, alerts, menu }: Props) {
       </div>
 
       <search className="hidden min-w-0 lg:block lg:max-w-155 lg:flex-[1_1_240px] xl:flex-[1_1_320px]">
-        <SearchField id="console-search" />
+        <SearchField id="console-search" hotkey />
       </search>
 
       <div className="ml-auto flex items-center lg:hidden">

@@ -37,7 +37,8 @@ export function MobileSearch() {
         >
           <SearchField
             id="console-search-mobile"
-            inputRef={(input) => input?.focus()}
+            focusOnMount
+            onPick={() => setOpen(false)}
           />
         </search>
       )}
