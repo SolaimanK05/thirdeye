@@ -9,9 +9,8 @@ const fetchMock = vi.hoisted(() => {
   return mock;
 });
 
-const { queryKeys, refreshSeconds, starMutationOptions } = await import(
-  "./queries"
-);
+const { layerRefetchInterval, queryKeys, refreshSeconds, starMutationOptions } =
+  await import("./queries");
 
 const TARGET: StarTarget = {
   id: "a0000000-0000-4000-8000-000000000001",
@@ -117,5 +116,22 @@ describe("refreshSeconds", () => {
     expect(refreshSeconds(5)).toBe(15);
     expect(refreshSeconds(60)).toBe(60);
     expect(refreshSeconds(7 * 24 * 3600)).toBe(3600);
+  });
+});
+
+describe("layerRefetchInterval", () => {
+  test("polls at the module cadence while the stream is not live", () => {
+    expect(layerRefetchInterval(60, false)).toBe(60_000);
+    expect(layerRefetchInterval(5, false)).toBe(15_000);
+  });
+
+  test("stops polling while the stream is live", () => {
+    expect(layerRefetchInterval(60, true)).toBe(false);
+    expect(layerRefetchInterval(5, true)).toBe(false);
+  });
+
+  test("a module with no cadence never polls", () => {
+    expect(layerRefetchInterval(0, false)).toBe(false);
+    expect(layerRefetchInterval(0, true)).toBe(false);
   });
 });

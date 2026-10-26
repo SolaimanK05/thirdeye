@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager, suppress
+from datetime import datetime
 from typing import Any
 
 import psycopg
@@ -24,6 +25,8 @@ from thirdeye.reads import DbReader, SnapshotRecord, Viewport, ViewRecord
 from thirdeye.registry import REGISTRY, Module, check_default_on, enabled
 from thirdeye.routes import v1
 from thirdeye.routes.health import APP_VERSION
+from thirdeye.signals import TERMINATION, on_signals
+from thirdeye.stream import Broadcaster, FetchedAt
 
 log = structlog.get_logger()
 
@@ -45,6 +48,14 @@ def view_loader(pool: Pool, registry: Mapping[str, Module]) -> ViewLoader:
             raise ValueError(f"module {module_id!r} has no viewport lookback")
         async with pool.connection() as conn:
             return await DbReader(conn).window(module_id, lookback, viewport)
+
+    return load
+
+
+def fetched_at_loader(pool: Pool) -> FetchedAt:
+    async def load(module_id: str) -> datetime | None:
+        async with pool.connection() as conn:
+            return await DbReader(conn).fetched_at(module_id)
 
     return load
 
@@ -71,18 +82,38 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     pool = create_pool(settings)
     await pool.open()
     cache = LayerCache(snapshot_loader(pool), view_loader(pool, app.state.registry))
+    broadcaster = Broadcaster(
+        cache,
+        fetched_at_loader(pool),
+        {
+            module.id: module.manifest.kind
+            for module in app.state.enabled_modules.values()
+        },
+        settings.instance_name,
+    )
     app.state.pool = pool
     app.state.layer_cache = cache
-    listener = asyncio.create_task(
-        listen_for_layers(listener_connect(settings), cache), name="layer-listener"
-    )
+    app.state.broadcaster = broadcaster
+    tasks = [
+        asyncio.create_task(
+            listen_for_layers(
+                listener_connect(settings), cache, on_update=broadcaster.notify
+            ),
+            name="layer-listener",
+        ),
+        asyncio.create_task(broadcaster.run(), name="stream-broadcaster"),
+    ]
     log.info("api.started", version=APP_VERSION, modules=settings.modules_enabled)
     try:
-        yield
+        with on_signals(TERMINATION, broadcaster.close):
+            yield
     finally:
-        listener.cancel()
-        with suppress(asyncio.CancelledError):
-            await listener
+        broadcaster.close()
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            with suppress(asyncio.CancelledError):
+                await task
         await pool.close()
         log.info("api.stopped")
 
@@ -110,7 +141,7 @@ def create_app(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_methods=["GET", "PUT", "DELETE"],
-        allow_headers=["Content-Type"],
+        allow_headers=["Content-Type", "Last-Event-ID"],
         expose_headers=["ETag", "Last-Modified"],
     )
     app.add_middleware(GZipMiddleware, minimum_size=GZIP_MINIMUM_BYTES)

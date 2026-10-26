@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     log_level: Literal["debug", "info", "warning", "error"] = "info"
     log_format: Literal["pretty", "json"] = "pretty"
     public_instance: bool = False
+    instance_name: str = Field(default="thirdeye-local", min_length=1, max_length=64)
     region_bbox: BBox = BBox(west=78.0, south=5.0, east=100.0, north=24.0)
     modules_enabled: list[str] = []
     modules_default_on: list[str] | None = None

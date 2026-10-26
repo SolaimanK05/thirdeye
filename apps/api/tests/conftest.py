@@ -75,6 +75,11 @@ class FakeReader:
         self.snapshot_calls += 1
         return self.snapshots.get(module_id)
 
+    async def fetched_at(self, module_id: str) -> datetime | None:
+        self.check()
+        snapshot = self.snapshots.get(module_id)
+        return None if snapshot is None else snapshot.fetched_at
+
     async def window(
         self, module_id: str, lookback_seconds: int, viewport: Viewport
     ) -> ViewRecord | None:

@@ -721,6 +721,119 @@
           }
         }
       }
+    },
+    "/v1/stream": {
+      "get": {
+        "tags": ["stream"],
+        "summary": "Live updates as server-sent events",
+        "description": "Events: hello (server_time, instance, resumed), layer (module_id, fetched_at, version), snapshot (a module's full entity rows) and delta (upserts and removes since the previous version). Event ids are opaque; send the last one back in Last-Event-ID to resume from the server's recent buffer, or get fresh snapshots when it is too old.",
+        "operationId": "stream_v1_stream_get",
+        "parameters": [
+          {
+            "name": "entities",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Comma separated entity module ids that get snapshot and delta events. Leave it out for every enabled entity module, or send it empty for none.",
+              "title": "Entities"
+            },
+            "description": "Comma separated entity module ids that get snapshot and delta events. Leave it out for every enabled entity module, or send it empty for none."
+          },
+          {
+            "name": "last-event-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last-Event-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/event-stream": {
+                "itemSchema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "string"
+                    },
+                    "event": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "retry": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {

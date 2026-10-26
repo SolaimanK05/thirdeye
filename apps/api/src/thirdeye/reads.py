@@ -322,6 +322,8 @@ where e.id = %s
 class Reader(Protocol):
     async def snapshot(self, module_id: str) -> SnapshotRecord | None: ...
 
+    async def fetched_at(self, module_id: str) -> datetime | None: ...
+
     async def window(
         self, module_id: str, lookback_seconds: int, viewport: Viewport
     ) -> ViewRecord | None: ...
@@ -351,6 +353,12 @@ class DbReader:
         async with self.conn.cursor(row_factory=class_row(SnapshotRecord)) as cur:
             await cur.execute(SNAPSHOT, (module_id,))
             return await cur.fetchone()
+
+    async def fetched_at(self, module_id: str) -> datetime | None:
+        async with self.conn.cursor() as cur:
+            await cur.execute(VIEW_FETCHED_AT, (module_id,))
+            row = await cur.fetchone()
+        return None if row is None else row[0]
 
     async def window(
         self, module_id: str, lookback_seconds: int, viewport: Viewport

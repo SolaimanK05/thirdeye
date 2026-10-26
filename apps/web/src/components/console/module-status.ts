@@ -1,4 +1,5 @@
 import type { HealthState, ModuleInfo } from "@/api/client";
+import type { StreamStatus } from "@/api/stream";
 import { formatClock, formatMinute } from "./time";
 import type { Health, StatusLine } from "./types";
 
@@ -55,6 +56,7 @@ function statusText(module: ModuleInfo): string {
 export function moduleStatusLines(
   modules: readonly ModuleInfo[] | undefined,
   apiDown: boolean,
+  stream: StreamStatus = "live",
 ): StatusLine[] {
   if (apiDown) return [{ health: "failed", text: "API unreachable" }];
   if (!modules) return [{ health: "empty", text: "connecting to API" }];
@@ -62,8 +64,11 @@ export function moduleStatusLines(
   if (enabled.length === 0) {
     return [{ health: "empty", text: "no modules enabled" }];
   }
-  return enabled.map((module) => ({
+  const lines = enabled.map((module) => ({
     health: HEALTH_FROM_API[module.health.state],
     text: statusText(module),
   }));
+  return stream === "reconnecting"
+    ? [{ health: "stale", text: "live stream reconnecting" }, ...lines]
+    : lines;
 }

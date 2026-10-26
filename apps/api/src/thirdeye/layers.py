@@ -26,6 +26,7 @@ type ViewLoader = Callable[[str, Viewport], Awaitable[ViewRecord | None]]
 type Key = tuple[str, Viewport | None]
 type Connect = Callable[[], Awaitable[psycopg.AsyncConnection[Any]]]
 type Sleep = Callable[[float], Awaitable[None]]
+type Notified = Callable[[str | None], None]
 
 
 class EventRow(BaseModel):
@@ -70,12 +71,18 @@ class CachedLayer:
     body: bytes
     etag: str
     last_modified: datetime | None
+    entities: tuple[EntityRow, ...] = ()
 
 
-def encode_layer(layer: Layer) -> CachedLayer:
+def encode_layer(layer: Layer, entities: tuple[EntityRow, ...] = ()) -> CachedLayer:
     body = layer.model_dump_json().encode()
     digest = hashlib.blake2b(body, digest_size=16).hexdigest()
-    return CachedLayer(body=body, etag=f'"{digest}"', last_modified=layer.fetched_at)
+    return CachedLayer(
+        body=body,
+        etag=f'"{digest}"',
+        last_modified=layer.fetched_at,
+        entities=entities,
+    )
 
 
 def build_layer(module_id: str, snapshot: SnapshotRecord | None) -> CachedLayer:
@@ -138,7 +145,8 @@ def build_entity_layer(
             truncated=len(inside) > len(shown),
             rows=[],
             entities=shown,
-        )
+        ),
+        entities=tuple(shown) if box is None else (),
     )
 
 
@@ -228,7 +236,10 @@ def reconnect_delay(failures: int) -> float:
 
 
 async def listen_for_layers(
-    connect: Connect, cache: LayerCache, sleep: Sleep = asyncio.sleep
+    connect: Connect,
+    cache: LayerCache,
+    sleep: Sleep = asyncio.sleep,
+    on_update: Notified | None = None,
 ) -> None:
     failures = 0
     while True:
@@ -238,9 +249,13 @@ async def listen_for_layers(
                 cache.invalidate()
                 failures = 0
                 log.info("layers.listening", channel=CHANNEL)
+                if on_update is not None:
+                    on_update(None)
                 async for notify in conn.notifies():
                     log.debug("layers.updated", module=notify.payload)
                     cache.invalidate(notify.payload)
+                    if on_update is not None:
+                        on_update(notify.payload)
         except (psycopg.Error, OSError) as exc:
             failures += 1
             delay = reconnect_delay(failures)

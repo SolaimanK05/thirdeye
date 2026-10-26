@@ -8,6 +8,7 @@ from thirdeye.routes import (
     layers,
     modules,
     search,
+    stream,
     watchlist,
 )
 
@@ -19,3 +20,4 @@ v1.include_router(events.router)
 v1.include_router(entities.router)
 v1.include_router(watchlist.router)
 v1.include_router(search.router)
+v1.include_router(stream.router)

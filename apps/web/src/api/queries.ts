@@ -9,6 +9,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import { streamIsLive, useStreamStatus } from "@/state/stream";
 import {
   ApiRequestError,
   api,
@@ -35,6 +36,8 @@ const MODULES_REFRESH = 30 * SECOND;
 
 export const queryKeys = {
   modules: ["modules"] as const,
+  layers: ["layer"] as const,
+  layerOf: (moduleId: string) => ["layer", moduleId] as const,
   layer: (moduleId: string, query: LayerQuery | null) =>
     [
       "layer",
@@ -76,12 +79,22 @@ export function refreshSeconds(cadenceSeconds: number): number {
   );
 }
 
+export function layerRefetchInterval(
+  cadenceSeconds: number,
+  live: boolean,
+): number | false {
+  return cadenceSeconds > 0 && !live
+    ? refreshSeconds(cadenceSeconds) * SECOND
+    : false;
+}
+
 export function useLayer(
   moduleId: string,
   cadenceSeconds: number,
   layerQuery: LayerQuery | null = null,
 ) {
   const refresh = refreshSeconds(cadenceSeconds) * SECOND;
+  const live = useStreamStatus(streamIsLive);
   return useQuery({
     queryKey: queryKeys.layer(moduleId, layerQuery),
     queryFn: async ({ signal }): Promise<Layer> =>
@@ -96,7 +109,7 @@ export function useLayer(
       ),
     placeholderData: keepPreviousData,
     staleTime: refresh,
-    refetchInterval: cadenceSeconds > 0 ? refresh : false,
+    refetchInterval: layerRefetchInterval(cadenceSeconds, live),
   });
 }
 

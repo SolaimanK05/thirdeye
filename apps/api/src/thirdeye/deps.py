@@ -8,6 +8,7 @@ from thirdeye.db import Conn
 from thirdeye.layers import LayerCache
 from thirdeye.reads import DbReader, Reader
 from thirdeye.registry import Module
+from thirdeye.stream import Broadcaster
 from thirdeye.writes import DbWriter, Writer
 
 
@@ -22,6 +23,11 @@ def get_writer(conn: Conn) -> Writer:
 def get_layer_cache(request: Request) -> LayerCache:
     cache: LayerCache = request.app.state.layer_cache
     return cache
+
+
+def get_broadcaster(request: Request) -> Broadcaster:
+    broadcaster: Broadcaster = request.app.state.broadcaster
+    return broadcaster
 
 
 def get_enabled(request: Request) -> dict[str, Module]:
@@ -47,6 +53,7 @@ def get_default_on(request: Request) -> frozenset[str]:
 ReaderDep = Annotated[Reader, Depends(get_reader)]
 WriterDep = Annotated[Writer, Depends(get_writer)]
 LayerCacheDep = Annotated[LayerCache, Depends(get_layer_cache)]
+BroadcasterDep = Annotated[Broadcaster, Depends(get_broadcaster)]
 EnabledDep = Annotated[dict[str, Module], Depends(get_enabled)]
 RegistryDep = Annotated[Mapping[str, Module], Depends(get_registry)]
 SettingsDep = Annotated[Settings, Depends(get_settings_dep)]

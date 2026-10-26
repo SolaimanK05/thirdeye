@@ -107,3 +107,34 @@ describe("module status lines", () => {
     ]);
   });
 });
+
+describe("live stream status", () => {
+  const quakes = moduleInfo("earthquakes", "USGS");
+
+  test("a reconnecting stream adds a line above the modules", () => {
+    expect(moduleStatusLines([quakes], false, "reconnecting")).toEqual([
+      { health: "stale", text: "live stream reconnecting" },
+      { health: "fresh", text: "earthquakes 05:59:12Z" },
+    ]);
+  });
+
+  test("a live or connecting stream adds nothing", () => {
+    for (const stream of ["live", "connecting"] as const) {
+      expect(moduleStatusLines([quakes], false, stream)).toEqual([
+        { health: "fresh", text: "earthquakes 05:59:12Z" },
+      ]);
+    }
+  });
+
+  test("an unreachable API is the only thing said", () => {
+    expect(moduleStatusLines(undefined, true, "reconnecting")).toEqual([
+      { health: "failed", text: "API unreachable" },
+    ]);
+  });
+
+  test("nothing enabled stays the only line while reconnecting", () => {
+    expect(moduleStatusLines([], false, "reconnecting")).toEqual([
+      { health: "empty", text: "no modules enabled" },
+    ]);
+  });
+});

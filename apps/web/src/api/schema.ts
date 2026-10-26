@@ -141,6 +141,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/stream": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Live updates as server-sent events
+     * @description Events: hello (server_time, instance, resumed), layer (module_id, fetched_at, version), snapshot (a module's full entity rows) and delta (upserts and removes since the previous version). Event ids are opaque; send the last one back in Last-Event-ID to resume from the server's recent buffer, or get fresh snapshots when it is too old.
+     */
+    get: operations["stream_v1_stream_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1057,6 +1077,67 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ErrorBody"];
+        };
+      };
+    };
+  };
+  stream_v1_stream_get: {
+    parameters: {
+      query?: {
+        /** @description Comma separated entity module ids that get snapshot and delta events. Leave it out for every enabled entity module, or send it empty for none. */
+        entities?: string | null;
+      };
+      header?: {
+        "last-event-id"?: string | null;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/event-stream": unknown;
+        };
+      };
+      /** @description Not allowed */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/event-stream": components["schemas"]["ErrorBody"];
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/event-stream": components["schemas"]["ErrorBody"];
+        };
+      };
+      /** @description Invalid request */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/event-stream": components["schemas"]["ErrorBody"];
+        };
+      };
+      /** @description Database unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/event-stream": components["schemas"]["ErrorBody"];
         };
       };
     };
