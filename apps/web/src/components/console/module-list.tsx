@@ -8,6 +8,7 @@ import { cx } from "./cx";
 import { Disclosure } from "./disclosure";
 import { type FilterChoice, FilterMenu } from "./filter-menu";
 import { isTyping } from "./hotkeys";
+import { RefinePanel } from "./refine-panel";
 import { StarredSection } from "./starred-section";
 import {
   drawsAnything,
@@ -278,6 +279,8 @@ function ModuleRowItem({ row, zoom }: { row: ModuleRow; zoom: ZoomLevel }) {
           {note.text}
         </span>
       </span>
+
+      <RefinePanel row={row} />
     </li>
   );
 }

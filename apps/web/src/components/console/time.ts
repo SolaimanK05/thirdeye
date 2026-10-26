@@ -35,6 +35,11 @@ export function msUntilNextSecond(nowMs: number): number {
   return 1000 - (nowMs % 1000);
 }
 
+export function formatMinute(at: Date): string {
+  const parts = formatUtc(at);
+  return `${parts.time.slice(0, 5)}Z`;
+}
+
 export function formatClock(at: Date): string {
   return formatUtc(at).time;
 }

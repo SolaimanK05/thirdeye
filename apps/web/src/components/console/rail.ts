@@ -2,7 +2,7 @@ import type { ModuleInfo } from "@/api/client";
 import type { StarItem } from "@/api/watchlist";
 import type { LayerCap } from "@/state/layer-caps";
 import { HEALTH_FROM_API } from "./module-status";
-import { formatClock, relativeAge } from "./time";
+import { formatClock, formatMinute, relativeAge } from "./time";
 import type {
   DomainGroup,
   Filter,
@@ -54,6 +54,9 @@ export function toRow(
     capped: capped[module.id],
     missingKey: module.key_env ?? undefined,
     failure: health.reason ?? undefined,
+    cooldownUntil: health.cooldown_until
+      ? formatMinute(new Date(health.cooldown_until))
+      : undefined,
     lastGood: health.fetched_at
       ? formatClock(new Date(health.fetched_at))
       : undefined,

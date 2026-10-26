@@ -6,7 +6,13 @@ import {
   SceneTransforms,
 } from "cesium";
 import { type LabelCandidate, placeLabels } from "./label-layout";
-import { HIT_RADIUS_PX, type Marker } from "./markers";
+import {
+  HIT_RADIUS_PX,
+  type LayerSizing,
+  type Marker,
+  type MarkerGlyph,
+  type MarkerSizing,
+} from "./markers";
 
 export type MarkerPalette = {
   default: string;
@@ -25,6 +31,8 @@ type Placed = {
 type Layer = {
   placed: Placed[];
   stale: boolean;
+  sizing: LayerSizing | undefined;
+  sized: MarkerSizing | undefined;
   x: Float32Array;
   y: Float32Array;
   visible: Uint8Array;
@@ -165,14 +173,76 @@ function squarePath(
   ctx.rect(x - size / 2, y - size / 2, size, size);
 }
 
-function glyphPath(
+const PLANE_OUTLINE: readonly (readonly [number, number])[] = [
+  [0, -0.5],
+  [0.07, -0.3],
+  [0.07, -0.1],
+  [0.5, 0.12],
+  [0.5, 0.22],
+  [0.07, 0.12],
+  [0.07, 0.32],
+  [0.2, 0.42],
+  [0.2, 0.5],
+  [0, 0.45],
+  [-0.2, 0.5],
+  [-0.2, 0.42],
+  [-0.07, 0.32],
+  [-0.07, 0.12],
+  [-0.5, 0.22],
+  [-0.5, 0.12],
+  [-0.07, -0.1],
+  [-0.07, -0.3],
+];
+
+function planePath(
   ctx: CanvasRenderingContext2D,
-  glyph: Marker["glyph"],
+  x: number,
+  y: number,
+  size: number,
+  rotation: number,
+) {
+  const angle = (rotation * Math.PI) / 180;
+  const sin = Math.sin(angle);
+  const cos = Math.cos(angle);
+  PLANE_OUTLINE.forEach(([px, py], index) => {
+    const dx = px * size;
+    const dy = py * size;
+    const sx = x + dx * cos - dy * sin;
+    const sy = y + dx * sin + dy * cos;
+    if (index === 0) ctx.moveTo(sx, sy);
+    else ctx.lineTo(sx, sy);
+  });
+  ctx.closePath();
+}
+
+function dotPath(
+  ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
   size: number,
 ) {
-  if (glyph === "flame") flamePath(ctx, x, y, size);
+  const radius = size / 2;
+  ctx.moveTo(x + radius, y);
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+}
+
+function drawnAs(layer: Layer, marker: Marker): MarkerSizing {
+  return marker.adaptive && layer.sized
+    ? layer.sized
+    : { glyph: marker.glyph, size: marker.size };
+}
+
+function glyphPath(
+  ctx: CanvasRenderingContext2D,
+  glyph: MarkerGlyph,
+  size: number,
+  rotation: number,
+  x: number,
+  y: number,
+) {
+  if (glyph === "plane") planePath(ctx, x, y, size, rotation);
+  else if (glyph === "dot") dotPath(ctx, x, y, size);
+  else if (glyph === "flame") flamePath(ctx, x, y, size);
   else if (glyph === "flame-ring") flameRingPath(ctx, x, y, size);
   else if (glyph === "square") squarePath(ctx, x, y, size);
   else trianglePath(ctx, x, y, size);
@@ -220,12 +290,19 @@ export class MarkerOverlay {
     );
   }
 
-  setLayer(moduleId: string, markers: readonly Marker[], stale: boolean) {
+  setLayer(
+    moduleId: string,
+    markers: readonly Marker[],
+    stale: boolean,
+    sizing?: LayerSizing,
+  ) {
     const previous = this.layers.get(moduleId);
     const placed = placeAll(markers, previous?.placed);
     this.layers.set(moduleId, {
       placed,
       stale,
+      sizing,
+      sized: previous?.sized,
       x: new Float32Array(placed.length),
       y: new Float32Array(placed.length),
       visible: new Uint8Array(placed.length),
@@ -308,7 +385,12 @@ export class MarkerOverlay {
       camera.positionWC,
       this.camera,
     );
-    let selected: { x: number; y: number; marker: Marker } | null = null;
+    let selected: {
+      x: number;
+      y: number;
+      marker: Marker;
+      size: number;
+    } | null = null;
     const counts: Record<string, number> = {};
     const names: NameLabel[] = [];
     ctx.font = `${LABEL_FONT_PX}px ${this.palette.font}`;
@@ -317,6 +399,7 @@ export class MarkerOverlay {
       layer.visible.fill(0);
       if (this.hidden.has(moduleId)) continue;
       let inView = 0;
+      const special: number[] = [];
       for (let i = 0; i < layer.placed.length; i++) {
         const { marker, position, scaled } = layer.placed[i];
         if (Cartesian3.dot(scaled, eye) <= 1) continue;
@@ -338,13 +421,23 @@ export class MarkerOverlay {
         inView++;
         layer.x[i] = screen.x;
         layer.y[i] = screen.y;
-        if (marker.id === this.selectedId) {
-          selected = { x: screen.x, y: screen.y, marker };
-        } else if (marker.persistentLabel) {
-          names.push(this.nameLabel(ctx, marker, screen.x, screen.y, layer));
+        if (marker.id === this.selectedId || marker.persistentLabel) {
+          special.push(i);
         }
       }
       counts[moduleId] = inView;
+      layer.sized = layer.sizing?.(inView);
+      for (const i of special) {
+        const { marker } = layer.placed[i];
+        const { size } = drawnAs(layer, marker);
+        if (marker.id === this.selectedId) {
+          selected = { x: layer.x[i], y: layer.y[i], marker, size };
+        } else {
+          names.push(
+            this.nameLabel(ctx, marker, size, layer.x[i], layer.y[i], layer),
+          );
+        }
+      }
       for (const tone of TONES) this.drawLayer(ctx, layer, tone);
     }
 
@@ -356,7 +449,13 @@ export class MarkerOverlay {
     }
 
     if (selected)
-      this.drawSelection(ctx, selected.x, selected.y, selected.marker);
+      this.drawSelection(
+        ctx,
+        selected.x,
+        selected.y,
+        selected.marker,
+        selected.size,
+      );
   }
 
   private drawLayer(
@@ -372,7 +471,8 @@ export class MarkerOverlay {
     for (let i = 0; i < layer.placed.length; i++) {
       const { marker } = layer.placed[i];
       if (!layer.visible[i] || marker.tone !== tone) continue;
-      glyphPath(ctx, marker.glyph, layer.x[i], layer.y[i], marker.size);
+      const { glyph, size } = drawnAs(layer, marker);
+      glyphPath(ctx, glyph, size, marker.rotation ?? 0, layer.x[i], layer.y[i]);
     }
     ctx.stroke();
     ctx.globalAlpha = 1;
@@ -396,16 +496,17 @@ export class MarkerOverlay {
   private nameLabel(
     ctx: CanvasRenderingContext2D,
     marker: Marker,
+    size: number,
     x: number,
     y: number,
     layer: Layer,
   ): NameLabel {
     return {
-      x: x + marker.size / 2 + NAME_GAP,
+      x: x + size / 2 + NAME_GAP,
       y: y - NAME_HEIGHT / 2,
       width: this.nameWidth(ctx, marker.label) + NAME_PAD_X * 2,
       height: NAME_HEIGHT,
-      priority: (marker.tone === "accent" ? 1000 : 0) + marker.size,
+      priority: (marker.tone === "accent" ? 1000 : 0) + size,
       text: marker.label,
       tone: marker.tone,
       stale: layer.stale,
@@ -415,15 +516,15 @@ export class MarkerOverlay {
   private drawNames(
     ctx: CanvasRenderingContext2D,
     names: readonly NameLabel[],
-    selected: { x: number; y: number; marker: Marker } | null,
+    selected: { x: number; y: number; size: number } | null,
   ) {
     if (names.length === 0) return;
     const blocked = selected
       ? [
           {
-            x: selected.x - selected.marker.size,
+            x: selected.x - selected.size,
             y: selected.y - NAME_HEIGHT,
-            width: selected.marker.size * 2 + 220,
+            width: selected.size * 2 + 220,
             height: NAME_HEIGHT * 2,
           },
         ]
@@ -449,8 +550,9 @@ export class MarkerOverlay {
     x: number,
     y: number,
     marker: Marker,
+    size: number,
   ) {
-    const reach = marker.size / 2 + BRACKET_GAP;
+    const reach = size / 2 + BRACKET_GAP;
     ctx.strokeStyle = this.palette.accent;
     ctx.lineWidth = LINE_WIDTH;
     ctx.beginPath();

@@ -323,7 +323,6 @@ export default function GlobeCanvas() {
       </div>
       <div aria-hidden="true" className="globe-disc">
         <div className="globe-glow" />
-        <div className="globe-sweep" />
       </div>
       <canvas
         ref={markerCanvas}

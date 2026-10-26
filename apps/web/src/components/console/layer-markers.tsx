@@ -1,11 +1,14 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import type { ModuleInfo } from "@/api/client";
 import { useLayer, useModules } from "@/api/queries";
+import { refineRows, serverFloor } from "@/modules/refine";
 import { ENTITY_VIEWS, MODULE_VIEWS } from "@/modules/registry";
+import { useRefineValues } from "@/modules/use-refine";
 import { useFilters } from "@/state/filters";
 import { useLayerCaps } from "@/state/layer-caps";
+import { useRefineStats } from "@/state/refine-stats";
 import { useSelection } from "@/state/selection";
 import { useStarred } from "@/state/starred";
 import { useViewport } from "@/state/viewport";
@@ -52,7 +55,9 @@ function ModuleMarkers({
   const view = useViewport((state) => state.box);
   const box = module.viewport ? queryBox(view) : null;
   const clustering = box === null ? null : clusterFor(box);
-  const { data } = useLayer(
+  const { controls, values } = useRefineValues(module.id);
+  const floor = serverFloor(controls, values);
+  const { data, dataUpdatedAt } = useLayer(
     module.id,
     module.cadence_seconds,
     box === null
@@ -60,18 +65,27 @@ function ModuleMarkers({
       : {
           bbox: boxParam(box),
           cell: clustering?.cell ?? null,
-          minSeverity: clustering?.minSeverity ?? 0,
+          minSeverity: Math.max(clustering?.minSeverity ?? 0, floor),
         },
   );
+  const setStat = useRefineStats((state) => state.setStat);
   const setCap = useLayerCaps((state) => state.setCap);
   const { zoomPercent } = useConsole();
   const filter = useFilters((state) => effectiveFilter(state.filters, module));
   const selectedModule = useSelection((state) => state.selected?.moduleId);
+  const selectedId = useSelection((state) =>
+    state.selected?.moduleId === module.id ? state.selected.id : null,
+  );
+  const keep = useMemo(
+    () => (selectedId === null ? starred : new Set([...starred, selectedId])),
+    [starred, selectedId],
+  );
   const select = useSelection((state) => state.select);
   const level = zoomLevelFor(zoomPercent).level;
   const range = module.zoom_range;
   const inRange = range !== null && level >= range.min && level <= range.max;
-  const stale = module.health.state === "stale";
+  const stale =
+    module.health.state === "stale" || module.health.state === "cooldown";
   const missingKey = module.health.state === "missing_key";
   const entityView =
     module.kind === "entities" ? ENTITY_VIEWS[module.id] : undefined;
@@ -82,18 +96,36 @@ function ModuleMarkers({
 
   useEffect(() => {
     if (entityView && data) {
+      const refined = refineRows(
+        data.entities,
+        entityView.refine,
+        values,
+        dataUpdatedAt,
+        keep,
+      );
+      setStat(module.id, { kept: refined.kept, total: refined.total });
       overlay.setLayer(
         module.id,
         withStars(
-          entityView.markers(data.entities, { level }),
+          entityView.markers(refined.rows, { level }),
           starred,
           onlyStarred,
         ),
         stale,
+        entityView.sizing,
       );
     } else if (eventView && data) {
-      overlay.setLayer(module.id, eventView.markers(data.rows), stale);
+      const refined = refineRows(
+        data.rows,
+        eventView.refine,
+        values,
+        dataUpdatedAt,
+        keep,
+      );
+      setStat(module.id, { kept: refined.kept, total: refined.total });
+      overlay.setLayer(module.id, eventView.markers(refined.rows), stale);
     } else {
+      setStat(module.id, null);
       overlay.removeLayer(module.id);
     }
   }, [
@@ -102,6 +134,10 @@ function ModuleMarkers({
     entityView,
     eventView,
     data,
+    dataUpdatedAt,
+    values,
+    keep,
+    setStat,
     stale,
     level,
     starred,
@@ -128,7 +164,13 @@ function ModuleMarkers({
     if (!drawing && selectedModule === module.id) select(null);
   }, [drawing, selectedModule, module.id, select]);
 
-  useEffect(() => () => overlay.removeLayer(module.id), [overlay, module.id]);
+  useEffect(
+    () => () => {
+      overlay.removeLayer(module.id);
+      setStat(module.id, null);
+    },
+    [overlay, module.id, setStat],
+  );
 
   return null;
 }

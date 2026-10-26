@@ -54,8 +54,24 @@ describe("toRow", () => {
       inView: 4,
       missingKey: undefined,
       failure: undefined,
+      cooldownUntil: undefined,
       lastGood: "05:59:12Z",
     });
+  });
+
+  test("a cooldown carries the minute it ends", () => {
+    const row = toRow(
+      moduleInfo(
+        "aircraft",
+        "OpenSky",
+        {},
+        { state: "cooldown", cooldown_until: "2026-10-26T11:32:40Z" },
+      ),
+      {},
+      {},
+    );
+    expect(row.health).toBe("cooldown");
+    expect(row.cooldownUntil).toBe("11:32Z");
   });
 
   test("a missing key names the env var", () => {

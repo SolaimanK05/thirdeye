@@ -1,10 +1,11 @@
 import type { HealthState, ModuleInfo } from "@/api/client";
-import { formatClock } from "./time";
+import { formatClock, formatMinute } from "./time";
 import type { Health, StatusLine } from "./types";
 
 export const HEALTH_FROM_API: Record<HealthState, Health> = {
   fresh: "fresh",
   stale: "stale",
+  cooldown: "cooldown",
   failed: "failed",
   empty: "empty",
   pending: "empty",
@@ -22,6 +23,13 @@ export function attributionLine(modules: readonly ModuleInfo[]): string | null {
   return credits.length > 0 ? `Data: ${credits.join(", ")}` : null;
 }
 
+function cooldownText(module: ModuleInfo, lastGood: string | null): string {
+  const { cooldown_until: until, record_count: loaded } = module.health;
+  const wait = until ? ` until ${formatMinute(new Date(until))}` : "";
+  const last = lastGood && loaded > 0 ? `, last good ${lastGood}` : "";
+  return `${module.id} cooldown${wait}${last}`;
+}
+
 function statusText(module: ModuleInfo): string {
   const { state, fetched_at: fetchedAt } = module.health;
   const at = fetchedAt ? formatClock(new Date(fetchedAt)) : null;
@@ -33,6 +41,8 @@ function statusText(module: ModuleInfo): string {
       return `${name} failed ${at ?? ""}`.trim();
     case "stale":
       return `${name} stale, last ${at ?? "unknown"}`;
+    case "cooldown":
+      return cooldownText(module, at);
     case "empty":
       return `${name} empty ${at ?? ""}`.trim();
     case "fresh":

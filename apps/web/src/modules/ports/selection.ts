@@ -89,7 +89,7 @@ export function portSelection(
       { label: "POSITION", rows: where },
       ...(port.length > 0 ? [{ label: "PORT", rows: port }] : []),
     ],
-    provenance: entityProvenance(detail, nowMs),
+    provenance: entityProvenance(detail, nowMs, options.stale),
     limitations: detail.provenance?.limitations ?? [],
   };
 }

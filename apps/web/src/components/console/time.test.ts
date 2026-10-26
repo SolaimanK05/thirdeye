@@ -1,5 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { formatUtc, msUntilNextSecond, relativeAge } from "./time";
+import {
+  formatMinute,
+  formatUtc,
+  msUntilNextSecond,
+  relativeAge,
+} from "./time";
 
 describe("formatUtc", () => {
   test("formats the header clock in UTC", () => {
@@ -22,6 +27,13 @@ describe("formatUtc", () => {
     expect(formatUtc(new Date("2026-01-05T01:02:03Z")).date).toBe(
       "MON 05 JAN 2026",
     );
+  });
+});
+
+describe("formatMinute", () => {
+  test("drops the seconds and keeps the Z", () => {
+    expect(formatMinute(new Date("2026-10-26T11:32:40Z"))).toBe("11:32Z");
+    expect(formatMinute(new Date("2026-10-26T01:02:03Z"))).toBe("01:02Z");
   });
 });
 

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect } from "react";
 import { ApiRequestError, type EntityDetail } from "@/api/client";
-import { useEntity, useEvent } from "@/api/queries";
+import { useEntity, useEvent, useModules } from "@/api/queries";
 import type { StarTarget } from "@/api/watchlist";
 import { entityName } from "@/modules/entity";
 import { entitySelectionFor, selectionFor } from "@/modules/registry";
@@ -95,6 +95,9 @@ function EntitySelection({
   const stars = useStarred();
   const now = useNow();
   const detail = entity.data;
+  const modules = useModules();
+  const health = modules.data?.find((m) => m.id === item.moduleId)?.health;
+  const moduleStale = health?.state === "stale" || health?.state === "cooldown";
   const { toggle: toggleStar, noteOpen, dismissNote } = stars;
 
   const ready = stars.ready;
@@ -118,6 +121,7 @@ function EntitySelection({
     const selection = entitySelectionFor(item.moduleId, detail, now, {
       starred: stars.isStarred(item.id),
       canStar: stars.ready,
+      stale: moduleStale,
     });
     const position = detail.last_observation?.position;
     return (

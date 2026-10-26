@@ -19,6 +19,11 @@ export const HEALTH: Record<
     label: "stale, serving last good",
     tone: "text-amber",
   },
+  cooldown: {
+    glyph: "[!]",
+    label: "cooling down, serving last good",
+    tone: "text-amber",
+  },
   failed: { glyph: "[E]", label: "feed failed", tone: "text-red" },
   empty: {
     glyph: "[ ]",
@@ -109,6 +114,14 @@ export function moduleNote(row: ModuleRow, zoom: ZoomLevel): ModuleNote {
     return {
       text: row.inView ? `hidden, ${row.inView} here` : "hidden here",
       tone: "ink-2",
+    };
+  }
+  if (row.health === "cooldown") {
+    const last =
+      row.loaded > 0 && row.lastGood ? `, last good ${row.lastGood}` : "";
+    return {
+      text: `cooldown until ${row.cooldownUntil ?? "later"}${last}`,
+      tone: "amber",
     };
   }
   if (row.health === "stale") {

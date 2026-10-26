@@ -120,7 +120,6 @@
     --globe-sphere-mid: #050806;
     --globe-rim: rgb(0 255 65 / 0.16);
     --globe-halo: rgb(0 255 65 / 0.06);
-    --globe-sweep: rgb(28 255 8 / 0.08);
     --globe-glow: rgb(0 255 65 / 0.55);
   }
 }
@@ -297,40 +296,5 @@
     [data-look="GREEN"] & {
       display: block;
     }
-  }
-
-  .globe-sweep {
-    display: none;
-    overflow: hidden;
-
-    [data-look="GREEN"] & {
-      display: block;
-    }
-
-    &::before {
-      content: "";
-      position: absolute;
-      inset: 0;
-      background: conic-gradient(
-        from 0deg,
-        transparent 0deg,
-        transparent 320deg,
-        var(--globe-sweep) 360deg
-      );
-      transform: rotate(40deg);
-
-      @media (prefers-reduced-motion: no-preference) {
-        animation: globe-sweep 12s linear infinite;
-      }
-    }
-  }
-}
-
-@keyframes globe-sweep {
-  from {
-    transform: rotate(40deg);
-  }
-  to {
-    transform: rotate(400deg);
   }
 }

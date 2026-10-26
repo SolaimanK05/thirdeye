@@ -122,6 +122,30 @@ describe("moduleNote follows the SCREENS priority order", () => {
     });
   });
 
+  test("a cooldown shows when it ends and the last good time, in amber", () => {
+    const row: ModuleRow = {
+      ...quakes,
+      health: "cooldown",
+      lastGood: "11:21:07Z",
+      cooldownUntil: "11:32Z",
+    };
+    expect(moduleNote(row, 2)).toEqual({
+      text: "cooldown until 11:32Z, last good 11:21:07Z",
+      tone: "amber",
+    });
+  });
+
+  test("a cooldown before any good fetch has no last good time", () => {
+    const row: ModuleRow = {
+      ...quakes,
+      health: "cooldown",
+      loaded: 0,
+      lastGood: "11:21:07Z",
+      cooldownUntil: "11:32Z",
+    };
+    expect(moduleNote(row, 2).text).toBe("cooldown until 11:32Z");
+  });
+
   test("normal shows when the module draws, in zoom percent", () => {
     expect(moduleNote(quakes, 2).text).toBe("auto, any zoom");
     expect(moduleNote({ ...quakes, zoomRange: null }, 2).text).toBe(

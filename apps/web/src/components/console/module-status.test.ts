@@ -54,6 +54,47 @@ describe("module status lines", () => {
     ]);
   });
 
+  test("a cooling down module says until when and keeps its last good time", () => {
+    const [line] = moduleStatusLines(
+      [
+        moduleInfo(
+          "aircraft",
+          "OpenSky",
+          {},
+          {
+            state: "cooldown",
+            fetched_at: "2026-10-26T11:21:07Z",
+            cooldown_until: "2026-10-26T11:32:40Z",
+          },
+        ),
+      ],
+      false,
+    );
+    expect(line).toEqual({
+      health: "cooldown",
+      text: "aircraft cooldown until 11:32Z, last good 11:21:07Z",
+    });
+  });
+
+  test("a cooldown with nothing fetched yet has no last good time", () => {
+    const [line] = moduleStatusLines(
+      [
+        moduleInfo(
+          "aircraft",
+          "OpenSky",
+          {},
+          {
+            state: "cooldown",
+            record_count: 0,
+            cooldown_until: "2026-10-26T11:32:40Z",
+          },
+        ),
+      ],
+      false,
+    );
+    expect(line.text).toBe("aircraft cooldown until 11:32Z");
+  });
+
   test("API down and loading states", () => {
     expect(moduleStatusLines(undefined, true)).toEqual([
       { health: "failed", text: "API unreachable" },

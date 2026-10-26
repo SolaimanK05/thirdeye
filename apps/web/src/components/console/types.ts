@@ -1,6 +1,12 @@
 export type ZoomLevel = 1 | 2 | 3 | 4;
 
-export type Health = "fresh" | "stale" | "failed" | "empty" | "missing-key";
+export type Health =
+  | "fresh"
+  | "stale"
+  | "cooldown"
+  | "failed"
+  | "empty"
+  | "missing-key";
 
 export type Filter = "all" | "starred" | "none";
 
@@ -23,6 +29,7 @@ export type ModuleRow = {
   missingKey?: string;
   failure?: string;
   lastGood?: string;
+  cooldownUntil?: string;
 };
 
 export type DomainGroup = {
