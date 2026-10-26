@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     firms_min_confidence: Literal["low", "nominal", "high"] = "high"
     firms_min_frp_mw: float = Field(default=0.0, ge=0, allow_inf_nan=False)
     aisstream_api_key: SecretStr | None = None
+    opensky_client_id: SecretStr | None = None
+    opensky_client_secret: SecretStr | None = None
+    opensky_bbox: BBox | None = None
+    budget_opensky_credits_day: int = Field(default=3800, ge=1)
+    governor_cooldown_min_s: float = Field(default=30.0, gt=0, allow_inf_nan=False)
+    governor_cooldown_max_s: float = Field(default=1800.0, gt=0, allow_inf_nan=False)
     cors_origins: list[str] = ["http://localhost:3000"]
 
     def has_key(self, key_env: str) -> bool:
@@ -42,7 +48,12 @@ class Settings(BaseSettings):
         return isinstance(value, SecretStr) and bool(value.get_secret_value().strip())
 
     def secret_values(self) -> list[str]:
-        secrets = (self.firms_map_key, self.aisstream_api_key)
+        secrets = (
+            self.firms_map_key,
+            self.aisstream_api_key,
+            self.opensky_client_id,
+            self.opensky_client_secret,
+        )
         return [
             value
             for secret in secrets
@@ -55,9 +66,15 @@ class Settings(BaseSettings):
     def lowercase_log_level(cls, value: object) -> object:
         return value.lower() if isinstance(value, str) else value
 
-    @field_validator("region_bbox")
+    @property
+    def aircraft_bbox(self) -> BBox:
+        return self.opensky_bbox or self.region_bbox
+
+    @field_validator("region_bbox", "opensky_bbox")
     @classmethod
-    def check_bbox(cls, box: BBox) -> BBox:
+    def check_bbox(cls, box: BBox | None) -> BBox | None:
+        if box is None:
+            return None
         if not -180 <= box.west <= 180 or not -180 <= box.east <= 180:
             raise ValueError("west and east must be between -180 and 180")
         if not -90 <= box.south <= 90 or not -90 <= box.north <= 90:
@@ -72,6 +89,15 @@ class Settings(BaseSettings):
                 "boxes crossing the 180° meridian are not supported"
             )
         return box
+
+    @model_validator(mode="after")
+    def check_cooldown_window(self) -> Self:
+        if self.governor_cooldown_min_s > self.governor_cooldown_max_s:
+            raise ValueError(
+                f"governor_cooldown_min_s ({self.governor_cooldown_min_s}) must not "
+                f"exceed governor_cooldown_max_s ({self.governor_cooldown_max_s})"
+            )
+        return self
 
     @model_validator(mode="after")
     def check_pool_sizes(self) -> Self:

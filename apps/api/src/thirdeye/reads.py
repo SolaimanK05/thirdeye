@@ -84,6 +84,7 @@ class HealthRecord(Record):
     fetched_at: datetime
     record_count: int
     reason: str | None
+    cooldown_until: datetime | None = None
 
 
 class SourceRecord(Record):
@@ -274,7 +275,8 @@ select fetched_at from layer_snapshot where module_id = %s
 """
 
 HEALTH = """
-select module_id, status::text as status, fetched_at, record_count, reason
+select module_id, status::text as status, fetched_at, record_count, reason,
+       cooldown_until
 from module_health
 """
 

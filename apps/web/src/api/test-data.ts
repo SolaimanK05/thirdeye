@@ -33,6 +33,7 @@ export function moduleInfo(
       record_count: 10,
       reason: null,
       stale_after_seconds: 180,
+      cooldown_until: null,
       ...health,
     },
     ...overrides,

@@ -1,4 +1,5 @@
 from collections.abc import Callable, Mapping
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -31,7 +32,7 @@ def fake_module(
             "name": module_id.title(),
             "domain": domain,
             "requires_key": key_env is not None,
-            "key_env": key_env,
+            "key_envs": () if key_env is None else (key_env,),
             "cadence_seconds": cadence_seconds,
         }
     )
@@ -152,6 +153,97 @@ class TestMissingKey:
         assert await worker.run(settings, once=True) == 0
 
 
+class TestSeveralKeys:
+    def registry(self) -> Mapping[str, Module]:
+        module = fake_module("sky")
+        manifest = module.manifest.model_copy(
+            update={
+                "requires_key": True,
+                "key_envs": ("OPENSKY_CLIENT_ID", "OPENSKY_CLIENT_SECRET"),
+            }
+        )
+        return build_registry([Module(manifest, module.fetch, module.normalize)])
+
+    def test_one_missing_key_is_enough_to_call_the_module_keyless(
+        self, make_registry_client: MakeRegistryClient
+    ) -> None:
+        settings = settings_for(
+            modules_enabled=["sky"], opensky_client_id=SecretStr("id")
+        )
+        [sky] = listing(make_registry_client(settings, self.registry()))
+        assert sky["health"]["state"] == "missing_key"
+        assert sky["key_env"] == "OPENSKY_CLIENT_SECRET"
+
+    def test_both_keys_make_the_module_usable(
+        self, make_registry_client: MakeRegistryClient
+    ) -> None:
+        settings = settings_for(
+            modules_enabled=["sky"],
+            opensky_client_id=SecretStr("id"),
+            opensky_client_secret=SecretStr("secret"),
+        )
+        [sky] = listing(make_registry_client(settings, self.registry()))
+        assert sky["health"]["state"] == "pending"
+        assert sky["key_env"] == "OPENSKY_CLIENT_ID"
+
+    def test_neither_key_names_the_first(
+        self, make_registry_client: MakeRegistryClient
+    ) -> None:
+        settings = settings_for(modules_enabled=["sky"])
+        [sky] = listing(make_registry_client(settings, self.registry()))
+        assert sky["key_env"] == "OPENSKY_CLIENT_ID"
+
+
+class TestCooldown:
+    def registry(self) -> Mapping[str, Module]:
+        return build_registry([fake_module("sky")])
+
+    def health(self, **changes: Any) -> dict[str, HealthRecord]:
+        fields: dict[str, Any] = {
+            "module_id": "sky",
+            "status": "ok",
+            "fetched_at": NOW,
+            "record_count": 40,
+            "reason": "cooldown until 11:32Z",
+            "cooldown_until": datetime.now(UTC) + timedelta(minutes=10),
+        }
+        return {"sky": HealthRecord(**(fields | changes))}
+
+    def test_a_module_in_cooldown_says_so_and_keeps_its_last_good_time(
+        self, make_registry_client: MakeRegistryClient, reader: FakeReader
+    ) -> None:
+        reader.health_rows = self.health()
+        [sky] = listing(
+            make_registry_client(settings_for(modules_enabled=["sky"]), self.registry())
+        )
+        assert sky["health"]["state"] == "cooldown"
+        assert sky["health"]["cooldown_until"] is not None
+        assert sky["health"]["fetched_at"] == NOW.isoformat().replace("+00:00", "Z")
+        assert sky["health"]["record_count"] == 40
+        assert sky["health"]["reason"] == "cooldown until 11:32Z"
+
+    def test_an_ended_cooldown_is_not_reported(
+        self, make_registry_client: MakeRegistryClient, reader: FakeReader
+    ) -> None:
+        reader.health_rows = self.health(
+            cooldown_until=datetime.now(UTC) - timedelta(minutes=1)
+        )
+        [sky] = listing(
+            make_registry_client(settings_for(modules_enabled=["sky"]), self.registry())
+        )
+        assert sky["health"]["state"] != "cooldown"
+        assert sky["health"]["cooldown_until"] is None
+
+    def test_a_module_not_in_cooldown_has_no_cooldown_time(
+        self, make_registry_client: MakeRegistryClient, reader: FakeReader
+    ) -> None:
+        reader.health_rows = self.health(cooldown_until=None, reason=None)
+        [sky] = listing(
+            make_registry_client(settings_for(modules_enabled=["sky"]), self.registry())
+        )
+        assert sky["health"]["cooldown_until"] is None
+
+
 class TestDefaultFilter:
     def test_every_enabled_module_starts_on_by_default(
         self, make_registry_client: MakeRegistryClient
@@ -187,17 +279,29 @@ class TestManifestKey:
         return MANIFEST.model_dump() | changes
 
     def test_requiring_a_key_needs_an_env_name(self) -> None:
-        with pytest.raises(ValidationError, match="key_env"):
+        with pytest.raises(ValidationError, match="key_envs"):
             ModuleManifest.model_validate(self.data(requires_key=True))
 
     def test_env_name_without_requiring_a_key_is_rejected(self) -> None:
-        with pytest.raises(ValidationError, match="key_env"):
-            ModuleManifest.model_validate(self.data(key_env="FIRMS_MAP_KEY"))
+        with pytest.raises(ValidationError, match="key_envs"):
+            ModuleManifest.model_validate(self.data(key_envs=("FIRMS_MAP_KEY",)))
 
     def test_env_name_must_look_like_an_env_var(self) -> None:
-        with pytest.raises(ValidationError, match="key_env"):
+        with pytest.raises(ValidationError, match="key_envs"):
             ModuleManifest.model_validate(
-                self.data(requires_key=True, key_env="firms key")
+                self.data(requires_key=True, key_envs=("firms key",))
+            )
+
+    def test_a_module_can_need_more_than_one_key(self) -> None:
+        manifest = ModuleManifest.model_validate(
+            self.data(requires_key=True, key_envs=("A_ID", "A_SECRET"))
+        )
+        assert manifest.key_envs == ("A_ID", "A_SECRET")
+
+    def test_a_key_name_cannot_repeat(self) -> None:
+        with pytest.raises(ValidationError, match="repeat"):
+            ModuleManifest.model_validate(
+                self.data(requires_key=True, key_envs=("A_ID", "A_ID"))
             )
 
 

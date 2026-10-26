@@ -7,10 +7,12 @@ from importlib.metadata import version
 
 import httpx
 import structlog
+from pydantic import JsonValue
 
 from thirdeye import store
 from thirdeye.config import Settings, get_settings
 from thirdeye.db import Pool, create_pool
+from thirdeye.governor import Fetched, Governor, RateLimited
 from thirdeye.logs import configure_logging
 from thirdeye.ontology import EntityReport
 from thirdeye.registry import Module, enabled
@@ -47,12 +49,21 @@ def scrub(text: str, settings: Settings) -> str:
 
 
 async def run_once(
-    module: Module, pool: Pool, client: httpx.AsyncClient, settings: Settings
+    module: Module,
+    pool: Pool,
+    client: httpx.AsyncClient,
+    settings: Settings,
+    governor: Governor | None = None,
 ) -> int:
     if module.fetch is None:
         raise ModuleNotPolled(module.id)
     fetched_at = datetime.now(UTC)
-    raw = await module.fetch(client, settings)
+    fetched = await module.fetch(client, settings)
+    raw = fetched.body if isinstance(fetched, Fetched) else fetched
+    if governor is not None:
+        governor.spend()
+        if isinstance(fetched, Fetched) and fetched.remaining is not None:
+            governor.sync(fetched.remaining)
     if module.normalize_entities is not None:
         reports = module.normalize_entities(raw, fetched_at)
         if not reports:
@@ -123,20 +134,71 @@ async def report_failure(
         log.error("module.health_not_saved", module=module.id, error=str(db_exc))
 
 
+async def report_cooldown(
+    module: Module, pool: Pool, governor: Governor, until: datetime, reason: str
+) -> None:
+    try:
+        async with pool.connection() as conn:
+            await store.record_cooldown(
+                conn, module.id, until, reason, datetime.now(UTC)
+            )
+            await store.record_meta(conn, module.id, governor_meta(governor))
+    except Exception as db_exc:  # noqa: BLE001 - the database may be what failed
+        log.error("module.health_not_saved", module=module.id, error=str(db_exc))
+
+
+def governor_meta(governor: Governor) -> dict[str, JsonValue]:
+    state = governor.state()
+    return {
+        "credits_left": state.credits_left,
+        "interval_seconds": state.interval_seconds,
+        "cost": state.cost,
+        "budget": state.budget,
+    }
+
+
+async def report_meta(module: Module, pool: Pool, governor: Governor) -> None:
+    meta = governor_meta(governor)
+    log.info("module.governed", module=module.id, **meta)
+    try:
+        async with pool.connection() as conn:
+            await store.record_meta(conn, module.id, meta)
+    except Exception as db_exc:  # noqa: BLE001 - the numbers are only advisory
+        log.error("module.health_not_saved", module=module.id, error=str(db_exc))
+
+
+async def fail(module: Module, pool: Pool, exc: Exception, settings: Settings) -> bool:
+    log.warning(
+        "module.failed",
+        module=module.id,
+        error=scrub(f"{type(exc).__name__}: {exc}", settings),
+    )
+    await report_failure(module, pool, exc, settings)
+    return False
+
+
 async def tick(
-    module: Module, pool: Pool, client: httpx.AsyncClient, settings: Settings
+    module: Module,
+    pool: Pool,
+    client: httpx.AsyncClient,
+    settings: Settings,
+    governor: Governor | None = None,
 ) -> bool:
     try:
-        count = await run_once(module, pool, client, settings)
-    except Exception as exc:  # noqa: BLE001 - one module must never stop the others
-        log.warning(
-            "module.failed",
-            module=module.id,
-            error=scrub(f"{type(exc).__name__}: {exc}", settings),
-        )
-        await report_failure(module, pool, exc, settings)
+        count = await run_once(module, pool, client, settings, governor)
+    except RateLimited as exc:
+        if governor is None:
+            return await fail(module, pool, exc, settings)
+        until = governor.on_rate_limited(exc.retry_after)
+        reason = f"cooldown until {until:%H:%M}Z"
+        log.warning("module.rate_limited", module=module.id, until=until.isoformat())
+        await report_cooldown(module, pool, governor, until, reason)
         return False
+    except Exception as exc:  # noqa: BLE001 - one module must never stop the others
+        return await fail(module, pool, exc, settings)
     log.info("module.ok", module=module.id, records=count)
+    if governor is not None:
+        await report_meta(module, pool, governor)
     return True
 
 
@@ -146,14 +208,20 @@ async def run_forever(
     client: httpx.AsyncClient,
     settings: Settings,
     sleep: Sleep = asyncio.sleep,
+    governor: Governor | None = None,
 ) -> None:
     failures = 0
     while True:
-        if await tick(module, pool, client, settings):
-            failures = 0
+        succeeded = await tick(module, pool, client, settings, governor)
+        failures = 0 if succeeded else failures + 1
+        if governor is not None:
+            delay = governor.next_delay()
+            if not succeeded and governor.cooldown_until is None:
+                delay = max(delay, backoff_delay(failures))
+            log.info("module.next_poll", module=module.id, in_seconds=round(delay))
+        elif succeeded:
             delay = float(module.manifest.cadence_seconds)
         else:
-            failures += 1
             delay = backoff_delay(failures)
             log.info(
                 "module.backoff", module=module.id, failures=failures, retry_in=delay
@@ -174,7 +242,9 @@ async def run(settings: Settings, *, once: bool) -> int:
     for module in enabled(settings.modules_enabled):
         if module.key_missing(settings):
             log.warning(
-                "module.skipped_no_key", module=module.id, key=module.manifest.key_env
+                "module.skipped_no_key",
+                module=module.id,
+                keys=module.missing_keys(settings),
             )
             continue
         modules.append(module)
@@ -196,15 +266,26 @@ async def run(settings: Settings, *, once: bool) -> int:
                     log.info("module.not_polled", module=module.id)
                     continue
                 polled.append(module)
+            governors = {
+                m.id: None if m.governor is None else m.governor.build(settings)
+                for m in polled
+            }
             if once:
                 results = await asyncio.gather(
-                    *(tick(m, pool, client, settings) for m in polled)
+                    *(tick(m, pool, client, settings, governors[m.id]) for m in polled)
                 )
                 return 0 if all(results) else 1
             async with asyncio.TaskGroup() as tasks:
                 for module in polled:
                     tasks.create_task(
-                        run_forever(module, pool, client, settings), name=module.id
+                        run_forever(
+                            module,
+                            pool,
+                            client,
+                            settings,
+                            governor=governors[module.id],
+                        ),
+                        name=module.id,
                     )
         return 0
     finally:

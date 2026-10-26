@@ -17,6 +17,7 @@ Longitude = Annotated[float, Field(ge=-180, le=180)]
 Latitude = Annotated[float, Field(ge=-90, le=90)]
 ZoomLevel = Annotated[int, Field(ge=1, le=4)]
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+EnvName = Annotated[str, StringConstraints(pattern=r"^[A-Z][A-Z0-9_]*$")]
 
 
 class EntityKind(StrEnum):
@@ -178,9 +179,7 @@ class ModuleManifest(Model):
     cadence_seconds: Annotated[int, Field(ge=0)]
     zoom_range: tuple[ZoomLevel, ZoomLevel] | None
     requires_key: bool
-    key_env: Annotated[str, StringConstraints(pattern=r"^[A-Z][A-Z0-9_]*$")] | None = (
-        None
-    )
+    key_envs: tuple[EnvName, ...] = ()
     provenance: Provenance
     viewport_lookback_seconds: Annotated[int, Field(gt=0)] | None = None
     retention_seconds: Annotated[int, Field(gt=0)] | None = None
@@ -230,8 +229,10 @@ class ModuleManifest(Model):
 
     @model_validator(mode="after")
     def check_key(self) -> Self:
-        if self.requires_key and self.key_env is None:
-            raise ValueError("a module that requires a key must name its key_env")
-        if not self.requires_key and self.key_env is not None:
-            raise ValueError("key_env is only for modules that require a key")
+        if self.requires_key and not self.key_envs:
+            raise ValueError("a module that requires a key must name its key_envs")
+        if not self.requires_key and self.key_envs:
+            raise ValueError("key_envs is only for modules that require a key")
+        if len(set(self.key_envs)) != len(self.key_envs):
+            raise ValueError("key_envs must not repeat a name")
         return self

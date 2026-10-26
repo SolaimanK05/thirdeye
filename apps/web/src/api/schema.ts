@@ -331,6 +331,8 @@ export interface components {
       reason: string | null;
       /** Stale After Seconds */
       stale_after_seconds: number | null;
+      /** Cooldown Until */
+      cooldown_until: string | null;
     };
     /** @enum {string} */
     HealthState:
@@ -339,7 +341,8 @@ export interface components {
       | "failed"
       | "empty"
       | "pending"
-      | "missing_key";
+      | "missing_key"
+      | "cooldown";
     JsonValue: unknown;
     /** Layer */
     Layer: {

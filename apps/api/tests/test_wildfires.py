@@ -98,7 +98,7 @@ class TestManifest:
     def test_is_registered_and_needs_its_key(self) -> None:
         module = REGISTRY["wildfires"]
         assert module.manifest.requires_key is True
-        assert module.manifest.key_env == "FIRMS_MAP_KEY"
+        assert module.manifest.key_envs == ("FIRMS_MAP_KEY",)
         assert module.manifest.cadence_seconds == 10_800
         assert module.manifest.provenance.source_id == "nasa-firms"
 
@@ -413,8 +413,8 @@ class TestKeyNeverLeaks:
         assert fires.call_count == 0
         assert [m for m, _ in recorder.writes] == ["earthquakes"]
         skipped = [e for e in logs if e["event"] == "module.skipped_no_key"]
-        assert [(e["module"], e["key"]) for e in skipped] == [
-            ("wildfires", "FIRMS_MAP_KEY")
+        assert [(e["module"], e["keys"]) for e in skipped] == [
+            ("wildfires", ("FIRMS_MAP_KEY",))
         ]
 
     @respx.mock

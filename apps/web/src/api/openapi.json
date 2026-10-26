@@ -1185,6 +1185,18 @@
               }
             ],
             "title": "Stale After Seconds"
+          },
+          "cooldown_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cooldown Until"
           }
         },
         "type": "object",
@@ -1193,13 +1205,22 @@
           "fetched_at",
           "record_count",
           "reason",
-          "stale_after_seconds"
+          "stale_after_seconds",
+          "cooldown_until"
         ],
         "title": "HealthOut"
       },
       "HealthState": {
         "type": "string",
-        "enum": ["fresh", "stale", "failed", "empty", "pending", "missing_key"]
+        "enum": [
+          "fresh",
+          "stale",
+          "failed",
+          "empty",
+          "pending",
+          "missing_key",
+          "cooldown"
+        ]
       },
       "JsonValue": {},
       "Layer": {

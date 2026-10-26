@@ -126,3 +126,38 @@ def test_ports_is_registered_as_an_entity_module() -> None:
     ports = REGISTRY["ports"]
     assert ports.manifest.kind == "entities"
     assert REGISTRY["earthquakes"].manifest.kind == "events"
+
+
+def test_a_governed_module_must_be_polled() -> None:
+    spec = REGISTRY["aircraft"].governor
+    assert spec is not None
+    unpolled = Module(
+        entity_manifest(cadence_seconds=0),
+        None,
+        normalize_entities=lambda raw, at: [],
+        governor=spec,
+    )
+    with pytest.raises(RegistryError, match="governed"):
+        build_registry([unpolled])
+    no_cadence = Module(
+        entity_manifest(cadence_seconds=0),
+        REGISTRY["earthquakes"].fetch,
+        normalize_entities=lambda raw, at: [],
+        governor=spec,
+    )
+    with pytest.raises(RegistryError, match="governed"):
+        build_registry([no_cadence])
+    polled = Module(
+        entity_manifest(cadence_seconds=30),
+        REGISTRY["earthquakes"].fetch,
+        normalize_entities=lambda raw, at: [],
+        governor=spec,
+    )
+    assert "things" in build_registry([polled])
+
+
+def test_aircraft_is_registered_with_a_governor_and_a_fetch() -> None:
+    module = REGISTRY["aircraft"]
+    assert module.fetch is not None
+    assert module.governor is not None
+    assert module.governor.floor_seconds == module.manifest.cadence_seconds

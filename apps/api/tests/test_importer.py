@@ -23,8 +23,9 @@ SOURCE = "importtest-feed"
 WPI_PREFIX = "importtest-"
 
 
-def test_only_entity_modules_can_be_imported() -> None:
+def test_only_static_entity_modules_can_be_imported() -> None:
     assert set(importable(REGISTRY)) == {"ports"}
+    assert "aircraft" not in importable(REGISTRY)
 
 
 def test_a_missing_file_is_reported_plainly(tmp_path: Path) -> None:

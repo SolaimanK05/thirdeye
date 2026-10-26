@@ -6,7 +6,7 @@ from thirdeye.ontology import Confidence, ModuleManifest, SourceReliability
 from thirdeye.reads import SourceRecord
 
 type HealthState = Literal[
-    "fresh", "stale", "failed", "empty", "pending", "missing_key"
+    "fresh", "stale", "failed", "empty", "pending", "missing_key", "cooldown"
 ]
 
 

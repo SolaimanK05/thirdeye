@@ -26,6 +26,7 @@ def importable(registry: Mapping[str, Module]) -> dict[str, Module]:
         module_id: module
         for module_id, module in registry.items()
         if module.normalize_entities is not None
+        and module.manifest.observation_retention_seconds is None
     }
 
 

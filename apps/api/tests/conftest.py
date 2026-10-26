@@ -218,6 +218,8 @@ class Recorder:
         self.prunes: list[tuple[str, int]] = []
         self.entity_writes: list[dict[str, Any]] = []
         self.observation_prunes: list[tuple[str, int]] = []
+        self.cooldowns: list[tuple[str, datetime, str]] = []
+        self.metas: list[tuple[str, dict[str, Any]]] = []
 
     async def prune_events(
         self, conn: object, module_id: str, keep_seconds: int, now: datetime
@@ -270,6 +272,21 @@ class Recorder:
     ) -> None:
         self.failures.append((module_id, reason))
 
+    async def record_cooldown(
+        self,
+        conn: object,
+        module_id: str,
+        until: datetime,
+        reason: str,
+        now: datetime,
+    ) -> None:
+        self.cooldowns.append((module_id, until, reason))
+
+    async def record_meta(
+        self, conn: object, module_id: str, meta: dict[str, Any]
+    ) -> None:
+        self.metas.append((module_id, dict(meta)))
+
 
 @pytest.fixture
 def recorder(monkeypatch: pytest.MonkeyPatch) -> Recorder:
@@ -279,4 +296,6 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> Recorder:
     monkeypatch.setattr(store, "prune_events", rec.prune_events)
     monkeypatch.setattr(store, "write_entities", rec.write_entities)
     monkeypatch.setattr(store, "prune_observations", rec.prune_observations)
+    monkeypatch.setattr(store, "record_cooldown", rec.record_cooldown)
+    monkeypatch.setattr(store, "record_meta", rec.record_meta)
     return rec

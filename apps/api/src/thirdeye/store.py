@@ -58,7 +58,23 @@ on conflict (module_id) do update set
     status = excluded.status,
     fetched_at = excluded.fetched_at,
     record_count = coalesce(%(record_count_update)s, module_health.record_count),
-    reason = excluded.reason
+    reason = excluded.reason,
+    cooldown_until = null
+"""
+
+UPSERT_COOLDOWN = """
+insert into module_health (
+    module_id, status, fetched_at, record_count, reason, cooldown_until
+) values (
+    %(module_id)s, 'failed'::module_status, %(now)s, 0, %(reason)s, %(until)s
+)
+on conflict (module_id) do update set
+    reason = excluded.reason,
+    cooldown_until = excluded.cooldown_until
+"""
+
+UPDATE_META = """
+update module_health set meta = %(meta)s where module_id = %(module_id)s
 """
 
 PRUNE_EVENTS = """
@@ -237,6 +253,34 @@ async def record_failure(
                 "reason": reason[:500],
             },
         )
+
+
+async def record_cooldown(
+    conn: AsyncConnection[TupleRow],
+    module_id: str,
+    until: datetime,
+    reason: str,
+    now: datetime,
+) -> None:
+    async with conn.transaction(), conn.cursor() as cur:
+        await cur.execute(
+            UPSERT_COOLDOWN,
+            {
+                "module_id": module_id,
+                "until": until,
+                "reason": reason[:500],
+                "now": now,
+            },
+        )
+
+
+async def record_meta(
+    conn: AsyncConnection[TupleRow],
+    module_id: str,
+    meta: Mapping[str, JsonValue],
+) -> None:
+    async with conn.transaction(), conn.cursor() as cur:
+        await cur.execute(UPDATE_META, {"module_id": module_id, "meta": Jsonb(meta)})
 
 
 @dataclass(frozen=True, slots=True)

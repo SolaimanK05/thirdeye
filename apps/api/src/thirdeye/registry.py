@@ -5,6 +5,10 @@ from datetime import datetime
 import httpx
 
 from thirdeye.config import Settings
+from thirdeye.governor import Fetched, GovernorSpec
+from thirdeye.modules.aircraft import manifest as aircraft_manifest
+from thirdeye.modules.aircraft import records as aircraft_records
+from thirdeye.modules.aircraft import source as aircraft_source
 from thirdeye.modules.earthquakes import manifest as earthquakes_manifest
 from thirdeye.modules.earthquakes import records as earthquakes_records
 from thirdeye.modules.earthquakes import source as earthquakes_source
@@ -16,7 +20,7 @@ from thirdeye.modules.wildfires import records as wildfires_records
 from thirdeye.modules.wildfires import source as wildfires_source
 from thirdeye.ontology import EntityReport, Event, ModuleManifest
 
-type Fetch = Callable[[httpx.AsyncClient, Settings], Awaitable[bytes]]
+type Fetch = Callable[[httpx.AsyncClient, Settings], Awaitable[bytes | Fetched]]
 type Normalize = Callable[[bytes, datetime], list[Event]]
 type NormalizeEntities = Callable[[bytes, datetime], list[EntityReport]]
 type Accept = Callable[[Event, Settings], bool]
@@ -33,16 +37,19 @@ class Module:
     normalize: Normalize | None = None
     accept: Accept | None = None
     normalize_entities: NormalizeEntities | None = None
+    governor: GovernorSpec | None = None
 
     @property
     def id(self) -> str:
         return self.manifest.id
 
-    def key_missing(self, settings: Settings) -> bool:
-        key_env = self.manifest.key_env
-        return self.manifest.requires_key and (
-            key_env is None or not settings.has_key(key_env)
+    def missing_keys(self, settings: Settings) -> tuple[str, ...]:
+        return tuple(
+            name for name in self.manifest.key_envs if not settings.has_key(name)
         )
+
+    def key_missing(self, settings: Settings) -> bool:
+        return self.manifest.requires_key and bool(self.missing_keys(settings))
 
 
 def check_module(module: Module) -> None:
@@ -60,6 +67,10 @@ def check_module(module: Module) -> None:
         )
     if module.accept is not None and module.normalize is None:
         raise RegistryError(f"module {module.id!r} filters events it never makes")
+    if module.governor is not None and (
+        module.fetch is None or manifest.cadence_seconds == 0
+    ):
+        raise RegistryError(f"module {module.id!r} is governed, so it must be polled")
     if module.fetch is None and manifest.cadence_seconds != 0:
         raise RegistryError(
             f"module {module.id!r} has no fetch, so its cadence must be 0"
@@ -93,6 +104,16 @@ REGISTRY = build_registry(
             ports_manifest.MANIFEST,
             ports_source.fetch,
             normalize_entities=ports_records.normalize_entities,
+        ),
+        Module(
+            aircraft_manifest.MANIFEST,
+            aircraft_source.fetch,
+            normalize_entities=aircraft_records.normalize_entities,
+            governor=GovernorSpec(
+                budget=aircraft_source.daily_budget,
+                cost=aircraft_source.credit_cost,
+                floor_seconds=float(aircraft_manifest.MANIFEST.cadence_seconds),
+            ),
         ),
     ]
 )
