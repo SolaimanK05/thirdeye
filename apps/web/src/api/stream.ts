@@ -1,4 +1,21 @@
+import type { EntityRow } from "./client";
+
 export type StreamStatus = "connecting" | "live" | "reconnecting";
+
+export type StreamSnapshot = {
+  moduleId: string;
+  fetchedAt: string | null;
+  version: number;
+  entities: EntityRow[];
+};
+
+export type StreamDelta = {
+  moduleId: string;
+  fetchedAt: string | null;
+  version: number;
+  upserts: EntityRow[];
+  removes: string[];
+};
 
 export type StreamEventLike = { readonly data: string };
 
@@ -16,6 +33,9 @@ export type StreamOptions = {
   onStatus: (status: StreamStatus) => void;
   onLayer: (moduleId: string) => void;
   onResync: () => void;
+  onSnapshot?: (snapshot: StreamSnapshot) => void;
+  onDelta?: (delta: StreamDelta) => void;
+  onServerTime?: (serverTimeMs: number) => void;
   connect?: (url: string) => EventSourceLike;
   setTimer?: (callback: () => void, milliseconds: number) => unknown;
   clearTimer?: (handle: unknown) => void;
@@ -50,14 +70,93 @@ function parseJson(data: string): Record<string, unknown> | null {
   }
 }
 
-export function parseHello(data: string): { resumed: boolean } | null {
+export type StreamHello = { resumed: boolean; serverTimeMs: number | null };
+
+export function parseHello(data: string): StreamHello | null {
   const body = parseJson(data);
-  return typeof body?.resumed === "boolean" ? { resumed: body.resumed } : null;
+  if (typeof body?.resumed !== "boolean") return null;
+  const serverTimeMs =
+    typeof body.server_time === "string" ? Date.parse(body.server_time) : null;
+  return {
+    resumed: body.resumed,
+    serverTimeMs:
+      serverTimeMs !== null && Number.isFinite(serverTimeMs)
+        ? serverTimeMs
+        : null,
+  };
 }
 
 export function parseLayerNotice(data: string): string | null {
   const body = parseJson(data);
   return typeof body?.module_id === "string" ? body.module_id : null;
+}
+
+function finite(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function finiteOrNull(value: unknown): boolean {
+  return value === null || finite(value);
+}
+
+export function isEntityRow(value: unknown): value is EntityRow {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.id === "string" &&
+    row.id.length > 0 &&
+    typeof row.kind === "string" &&
+    typeof row.name === "string" &&
+    finite(row.lon) &&
+    row.lon >= -180 &&
+    row.lon <= 180 &&
+    finite(row.lat) &&
+    row.lat >= -90 &&
+    row.lat <= 90 &&
+    typeof row.t === "string" &&
+    !Number.isNaN(Date.parse(row.t)) &&
+    finiteOrNull(row.sog) &&
+    finiteOrNull(row.cog) &&
+    finiteOrNull(row.heading) &&
+    finiteOrNull(row.alt) &&
+    typeof row.confidence === "string" &&
+    typeof row.attrs === "object" &&
+    row.attrs !== null
+  );
+}
+
+function moduleHeader(
+  body: Record<string, unknown> | null,
+): { moduleId: string; fetchedAt: string | null; version: number } | null {
+  if (!body || typeof body.module_id !== "string") return null;
+  if (!finite(body.version)) return null;
+  const fetchedAt =
+    typeof body.fetched_at === "string" ? body.fetched_at : null;
+  return { moduleId: body.module_id, fetchedAt, version: body.version };
+}
+
+export function parseSnapshot(data: string): StreamSnapshot | null {
+  const body = parseJson(data);
+  const header = moduleHeader(body);
+  if (!header || !Array.isArray(body?.entities)) return null;
+  return { ...header, entities: body.entities.filter(isEntityRow) };
+}
+
+export function parseDelta(data: string): StreamDelta | null {
+  const body = parseJson(data);
+  const header = moduleHeader(body);
+  if (
+    !header ||
+    !Array.isArray(body?.upserts) ||
+    !Array.isArray(body?.removes)
+  ) {
+    return null;
+  }
+  return {
+    ...header,
+    upserts: body.upserts.filter(isEntityRow),
+    removes: body.removes.filter((id): id is string => typeof id === "string"),
+  };
 }
 
 export function startStream(options: StreamOptions): () => void {
@@ -66,6 +165,9 @@ export function startStream(options: StreamOptions): () => void {
     onStatus,
     onLayer,
     onResync,
+    onSnapshot,
+    onDelta,
+    onServerTime,
     connect = (target: string) => new EventSource(target),
     setTimer = (callback: () => void, milliseconds: number) =>
       setTimeout(callback, milliseconds),
@@ -96,6 +198,7 @@ export function startStream(options: StreamOptions): () => void {
       const hello = parseHello(event.data);
       if (hello === null) return;
       failures = 0;
+      if (hello.serverTimeMs !== null) onServerTime?.(hello.serverTimeMs);
       if (announced && !hello.resumed) onResync();
       announced = true;
       report("live");
@@ -105,6 +208,18 @@ export function startStream(options: StreamOptions): () => void {
       if (!active()) return;
       const moduleId = parseLayerNotice(event.data);
       if (moduleId !== null) onLayer(moduleId);
+    });
+
+    current.addEventListener("snapshot", (event) => {
+      if (!active()) return;
+      const snapshot = parseSnapshot(event.data);
+      if (snapshot !== null) onSnapshot?.(snapshot);
+    });
+
+    current.addEventListener("delta", (event) => {
+      if (!active()) return;
+      const delta = parseDelta(event.data);
+      if (delta !== null) onDelta?.(delta);
     });
 
     current.addEventListener("error", () => {

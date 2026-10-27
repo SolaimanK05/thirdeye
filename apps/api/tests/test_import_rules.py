@@ -14,7 +14,12 @@ PACKAGE = SRC / "thirdeye"
 MODULES = PACKAGE / "modules"
 
 # What a module may import from inside thirdeye (besides itself).
-MODULE_ALLOWED = ("thirdeye.ontology", "thirdeye.governor", "thirdeye.config")
+MODULE_ALLOWED = (
+    "thirdeye.ontology",
+    "thirdeye.governor",
+    "thirdeye.config",
+    "thirdeye.streams",
+)
 
 URL = re.compile(r"https?://")
 LOCAL_URL = re.compile(r"https?://(localhost|127\.0\.0\.1)(?=[:/]|$)")
@@ -77,7 +82,7 @@ def test_modules_only_import_allowed_internals() -> None:
             problems.append(f"{path.relative_to(SRC)}:{line} imports {name}")
     assert not problems, "\n".join(
         [
-            "Modules may only import their own code, ontology, governor and config:",
+            "Modules may only import their own code, ontology, governor, config and streams:",
             *problems,
         ]
     )

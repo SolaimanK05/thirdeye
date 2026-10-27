@@ -2,6 +2,7 @@ import { Crosshair, LocateFixed, Star, TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
 import { cx } from "./cx";
 import { Disclosure } from "./disclosure";
+import { SpeedChart } from "./speed-chart";
 import { CONFIDENCE } from "./status";
 import type { ConfidenceTag, Selection, SelectionAction } from "./types";
 
@@ -92,11 +93,18 @@ export function SelectionDetails({
                   aria-label={label(selection.starred)}
                   aria-keyshortcuts={key}
                   title={label(selection.starred)}
+                  aria-pressed={
+                    action === "follow"
+                      ? selection.following === true
+                      : undefined
+                  }
                   className={cx(
                     "flex min-h-9 min-w-9 items-center justify-center gap-1.5 border border-line-2 px-2 transition-colors duration-120 ease-out hover-fine:text-accent",
                     action === "star" && selection.starred
                       ? "text-amber"
-                      : "text-ink",
+                      : action === "follow" && selection.following
+                        ? "border-accent text-accent"
+                        : "text-ink",
                   )}
                 >
                   {action === "star" && selection.starred ? (
@@ -143,6 +151,16 @@ export function SelectionDetails({
           </dl>
         </Disclosure>
       ))}
+
+      {selection.chart && (
+        <Disclosure
+          title={`[ ${selection.chart.label} ]`}
+          className="border-line border-b pb-2.5"
+          summaryClassName="px-4"
+        >
+          <SpeedChart chart={selection.chart} />
+        </Disclosure>
+      )}
 
       <Disclosure
         title="[ PROVENANCE ]"

@@ -6,6 +6,7 @@ export type MarkerGlyph =
   | "flame-ring"
   | "square"
   | "plane"
+  | "ship"
   | "dot";
 
 export type MarkerTone = "default" | "notable" | "accent";
@@ -46,3 +47,5 @@ export function withStars(
   }
   return result;
 }
+
+export const POSITION_STRIDE = 4;

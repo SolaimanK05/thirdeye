@@ -6,11 +6,13 @@ import { useLayer, useModules } from "@/api/queries";
 import { refineRows, serverFloor } from "@/modules/refine";
 import { ENTITY_VIEWS, MODULE_VIEWS } from "@/modules/registry";
 import { useRefineValues } from "@/modules/use-refine";
+import { entityStore, useEntityView } from "@/state/entities";
 import { useFilters } from "@/state/filters";
 import { useLayerCaps } from "@/state/layer-caps";
 import { useRefineStats } from "@/state/refine-stats";
 import { useSelection } from "@/state/selection";
 import { useStarred } from "@/state/starred";
+import { streamIsLive, useStreamStatus } from "@/state/stream";
 import { useViewport } from "@/state/viewport";
 import { useConsole } from "./console-shell";
 import type { MarkerOverlay } from "./marker-overlay";
@@ -57,6 +59,9 @@ function ModuleMarkers({
   const clustering = box === null ? null : clusterFor(box);
   const { controls, values } = useRefineValues(module.id);
   const floor = serverFloor(controls, values);
+  const live = useStreamStatus(streamIsLive);
+  const stored = useEntityView(module.id);
+  const fromStream = module.kind === "entities" && live && stored !== undefined;
   const { data, dataUpdatedAt } = useLayer(
     module.id,
     module.cadence_seconds,
@@ -67,7 +72,16 @@ function ModuleMarkers({
           cell: clustering?.cell ?? null,
           minSeverity: Math.max(clustering?.minSeverity ?? 0, floor),
         },
+    !fromStream,
   );
+  const queryEntities = module.kind === "entities" ? data?.entities : undefined;
+  const queryFetchedAt = data?.fetched_at ?? null;
+
+  useEffect(() => {
+    if (queryEntities) {
+      entityStore.seed(module.id, queryEntities, queryFetchedAt);
+    }
+  }, [module.id, queryEntities, queryFetchedAt]);
   const setStat = useRefineStats((state) => state.setStat);
   const setCap = useLayerCaps((state) => state.setCap);
   const { zoomPercent } = useConsole();
@@ -95,12 +109,12 @@ function ModuleMarkers({
   const drawing = (filter === "all" || onlyStarred) && !missingKey;
 
   useEffect(() => {
-    if (entityView && data) {
+    if (entityView && stored) {
       const refined = refineRows(
-        data.entities,
+        stored.rows,
         entityView.refine,
         values,
-        dataUpdatedAt,
+        stored.updatedAt,
         keep,
       );
       setStat(module.id, { kept: refined.kept, total: refined.total });
@@ -133,6 +147,7 @@ function ModuleMarkers({
     module.id,
     entityView,
     eventView,
+    stored,
     data,
     dataUpdatedAt,
     values,

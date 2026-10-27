@@ -1,8 +1,11 @@
 import { describe, expect, test, vi } from "vitest";
 import {
   type EventSourceLike,
+  isEntityRow,
+  parseDelta,
   parseHello,
   parseLayerNotice,
+  parseSnapshot,
   reconnectDelay,
   type StreamEventLike,
   type StreamStatus,
@@ -62,6 +65,9 @@ function setup(random = () => 0.5) {
   const sources: FakeSource[] = [];
   const statuses: StreamStatus[] = [];
   const layers: string[] = [];
+  const snapshots: string[] = [];
+  const deltas: string[] = [];
+  const clocks: number[] = [];
   const resyncs = vi.fn();
   const timers: { callback: () => void; milliseconds: number; id: number }[] =
     [];
@@ -71,6 +77,9 @@ function setup(random = () => 0.5) {
     onStatus: (status) => statuses.push(status),
     onLayer: (moduleId) => layers.push(moduleId),
     onResync: resyncs,
+    onSnapshot: (snapshot) => snapshots.push(snapshot.moduleId),
+    onDelta: (delta) => deltas.push(delta.moduleId),
+    onServerTime: (serverTimeMs) => clocks.push(serverTimeMs),
     connect: (url) => {
       const source = new FakeSource(url);
       sources.push(source);
@@ -84,13 +93,37 @@ function setup(random = () => 0.5) {
     clearTimer: (handle) => cleared.push(handle as number),
     random,
   });
-  return { sources, statuses, layers, resyncs, timers, cleared, stop };
+  return {
+    sources,
+    statuses,
+    layers,
+    snapshots,
+    deltas,
+    clocks,
+    resyncs,
+    timers,
+    cleared,
+    stop,
+  };
 }
 
 describe("parsing", () => {
   test("a hello needs a boolean resumed", () => {
-    expect(parseHello(hello(true))).toEqual({ resumed: true });
-    expect(parseHello(hello(false))).toEqual({ resumed: false });
+    expect(parseHello(hello(true))).toEqual({
+      resumed: true,
+      serverTimeMs: Date.parse("2026-10-26T10:00:00Z"),
+    });
+    expect(parseHello(hello(false))?.resumed).toBe(false);
+    expect(parseHello('{"resumed":true}')).toEqual({
+      resumed: true,
+      serverTimeMs: null,
+    });
+    expect(
+      parseHello('{"resumed":true,"server_time":"not a time"}')?.serverTimeMs,
+    ).toBeNull();
+    expect(
+      parseHello('{"resumed":true,"server_time":5}')?.serverTimeMs,
+    ).toBeNull();
     expect(parseHello('{"resumed":"yes"}')).toBeNull();
     expect(parseHello("not json")).toBeNull();
     expect(parseHello("[]")).toBeNull();
@@ -101,6 +134,107 @@ describe("parsing", () => {
     expect(parseLayerNotice(notice("aircraft"))).toBe("aircraft");
     expect(parseLayerNotice('{"module_id":3}')).toBeNull();
     expect(parseLayerNotice("{")).toBeNull();
+  });
+});
+
+function entity(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "a1",
+    kind: "aircraft",
+    name: "TEST1",
+    lon: 88.1,
+    lat: 22.5,
+    t: "2026-10-26T10:00:00Z",
+    sog: 400,
+    cog: 90,
+    heading: null,
+    alt: 9000,
+    confidence: "observed",
+    attrs: {},
+    ...overrides,
+  };
+}
+
+describe("entity rows", () => {
+  test("a complete row is accepted", () => {
+    expect(isEntityRow(entity())).toBe(true);
+  });
+
+  test("rows that are out of range or malformed are rejected", () => {
+    for (const bad of [
+      null,
+      "x",
+      entity({ id: "" }),
+      entity({ lon: 181 }),
+      entity({ lat: -91 }),
+      entity({ lon: Number.NaN }),
+      entity({ lon: "1" }),
+      entity({ t: "not a time" }),
+      entity({ sog: "fast" }),
+      entity({ alt: Number.POSITIVE_INFINITY }),
+      entity({ attrs: null }),
+      entity({ confidence: 3 }),
+    ]) {
+      expect(isEntityRow(bad)).toBe(false);
+    }
+  });
+});
+
+describe("snapshot and delta parsing", () => {
+  const header = {
+    module_id: "aircraft",
+    fetched_at: "2026-10-26T10:00:00Z",
+    version: 4,
+  };
+
+  test("a snapshot keeps its good rows and drops the bad ones", () => {
+    const parsed = parseSnapshot(
+      JSON.stringify({
+        ...header,
+        entities: [entity(), entity({ id: "bad", lon: 400 })],
+      }),
+    );
+    expect(parsed?.moduleId).toBe("aircraft");
+    expect(parsed?.version).toBe(4);
+    expect(parsed?.fetchedAt).toBe("2026-10-26T10:00:00Z");
+    expect(parsed?.entities.map((row) => row.id)).toEqual(["a1"]);
+  });
+
+  test("a snapshot with no fetch time keeps null", () => {
+    const parsed = parseSnapshot(
+      JSON.stringify({ ...header, fetched_at: null, entities: [] }),
+    );
+    expect(parsed?.fetchedAt).toBeNull();
+  });
+
+  test("a snapshot needs a module, a version and a list", () => {
+    expect(parseSnapshot("garbage")).toBeNull();
+    expect(
+      parseSnapshot(JSON.stringify({ ...header, entities: 3 })),
+    ).toBeNull();
+    expect(
+      parseSnapshot(JSON.stringify({ entities: [], version: 1 })),
+    ).toBeNull();
+    expect(
+      parseSnapshot(JSON.stringify({ module_id: "a", entities: [] })),
+    ).toBeNull();
+  });
+
+  test("a delta keeps its upserts and its removes", () => {
+    const parsed = parseDelta(
+      JSON.stringify({
+        ...header,
+        upserts: [entity(), entity({ id: "bad", lat: 99 })],
+        removes: ["x", 3, "y"],
+      }),
+    );
+    expect(parsed?.upserts.map((row) => row.id)).toEqual(["a1"]);
+    expect(parsed?.removes).toEqual(["x", "y"]);
+  });
+
+  test("a delta needs both lists", () => {
+    expect(parseDelta(JSON.stringify({ ...header, upserts: [] }))).toBeNull();
+    expect(parseDelta(JSON.stringify({ ...header, removes: [] }))).toBeNull();
   });
 });
 
@@ -155,6 +289,47 @@ describe("the connection", () => {
     sources[0]?.emit("layer", notice("earthquakes"));
     sources[0]?.emit("layer", "garbage");
     expect(layers).toEqual(["aircraft", "earthquakes"]);
+  });
+
+  test("passes snapshots and deltas on and skips ones it cannot read", () => {
+    const { sources, snapshots, deltas } = setup();
+    const header = { module_id: "aircraft", fetched_at: null, version: 1 };
+    sources[0]?.emit("snapshot", JSON.stringify({ ...header, entities: [] }));
+    sources[0]?.emit("snapshot", "garbage");
+    sources[0]?.emit(
+      "delta",
+      JSON.stringify({ ...header, upserts: [], removes: [] }),
+    );
+    sources[0]?.emit("delta", "{}");
+    expect(snapshots).toEqual(["aircraft"]);
+    expect(deltas).toEqual(["aircraft"]);
+  });
+
+  test("ignores snapshots and deltas from a source that was replaced", () => {
+    const { sources, snapshots, timers } = setup();
+    sources[0]?.fail(true);
+    timers[0]?.callback();
+    sources[0]?.emit(
+      "snapshot",
+      JSON.stringify({
+        module_id: "aircraft",
+        fetched_at: null,
+        version: 1,
+        entities: [],
+      }),
+    );
+    expect(snapshots).toEqual([]);
+  });
+
+  test("reports the server time on every hello that carries one", () => {
+    const { sources, clocks } = setup();
+    sources[0]?.emit("hello", hello(false));
+    sources[0]?.emit("hello", '{"resumed":true}');
+    sources[0]?.emit("hello", hello(true));
+    expect(clocks).toEqual([
+      Date.parse("2026-10-26T10:00:00Z"),
+      Date.parse("2026-10-26T10:00:00Z"),
+    ]);
   });
 
   test("the first hello never asks for a resync", () => {

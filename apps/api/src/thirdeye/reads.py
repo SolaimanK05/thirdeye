@@ -126,6 +126,18 @@ class EntityRecord(SourceRecord):
     obs_cog: float | None
     obs_alt: float | None
     obs_confidence: Confidence | None
+    obs_heading: float | None = None
+
+
+class FixRecord(Record):
+    t: datetime
+    lon: float
+    lat: float
+    sog: float | None
+    cog: float | None
+    heading: float | None
+    alt: float | None
+    confidence: Confidence
 
 
 SOURCE_COLUMNS = """
@@ -303,19 +315,33 @@ select
     st_y(o.geom) as obs_lat,
     o.sog as obs_sog,
     o.cog as obs_cog,
+    o.heading as obs_heading,
     o.alt as obs_alt,
     o.confidence::text as obs_confidence,
     {SOURCE_COLUMNS}
 from entity e
 join source s on s.id = e.source_id
 left join lateral (
-    select t, geom, sog, cog, alt, confidence
+    select t, geom, sog, cog, heading, alt, confidence
     from observation
     where entity_id = e.id
     order by t desc
     limit 1
 ) o on true
 where e.id = %s
+"""
+
+FIXES = """
+select * from (
+    select
+        t, st_x(geom) as lon, st_y(geom) as lat, sog, cog, heading, alt,
+        confidence::text as confidence
+    from observation
+    where entity_id = %s
+    order by t desc
+    limit %s
+) newest
+order by t
 """
 
 
@@ -343,6 +369,8 @@ class Reader(Protocol):
     async def event(self, event_id: str) -> EventRecord | None: ...
 
     async def entity(self, entity_id: UUID) -> EntityRecord | None: ...
+
+    async def fixes(self, entity_id: UUID, limit: int) -> list[FixRecord]: ...
 
 
 class DbReader:
@@ -454,3 +482,8 @@ class DbReader:
         async with self.conn.cursor(row_factory=class_row(EntityRecord)) as cur:
             await cur.execute(ENTITY, (entity_id,))
             return await cur.fetchone()
+
+    async def fixes(self, entity_id: UUID, limit: int) -> list[FixRecord]:
+        async with self.conn.cursor(row_factory=class_row(FixRecord)) as cur:
+            await cur.execute(FIXES, (entity_id, limit))
+            return await cur.fetchall()

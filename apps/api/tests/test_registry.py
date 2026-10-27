@@ -3,9 +3,12 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from thirdeye.config import Settings
+from thirdeye.db import Pool
 from thirdeye.modules.earthquakes.manifest import MANIFEST
 from thirdeye.ontology import ModuleManifest
 from thirdeye.registry import REGISTRY, Module, RegistryError, build_registry, enabled
+from thirdeye.streams import Stop
 
 
 def manifest_data(**changes: Any) -> dict[str, Any]:
@@ -120,6 +123,26 @@ def test_an_event_manifest_cannot_use_observation_retention() -> None:
         ModuleManifest.model_validate(manifest_data(observation_retention_seconds=3600))
     with pytest.raises(ValidationError, match="only for entity modules"):
         ModuleManifest.model_validate(manifest_data(snapshot_window_seconds=60))
+    with pytest.raises(ValidationError, match="only for entity modules"):
+        ModuleManifest.model_validate(manifest_data(render_delay_seconds=60))
+
+
+def test_a_render_delay_must_be_positive() -> None:
+    assert entity_manifest(render_delay_seconds=105).render_delay_seconds == 105
+    assert entity_manifest().render_delay_seconds is None
+    with pytest.raises(ValidationError):
+        entity_manifest(render_delay_seconds=0)
+    with pytest.raises(ValidationError):
+        entity_manifest(render_delay_seconds=-5)
+
+
+def test_only_movers_delay_rendering() -> None:
+    delays = {
+        module_id: module.manifest.render_delay_seconds
+        for module_id, module in REGISTRY.items()
+        if module.manifest.render_delay_seconds is not None
+    }
+    assert delays == {"aircraft": 105, "vessels": 180}
 
 
 def test_ports_is_registered_as_an_entity_module() -> None:
@@ -161,3 +184,65 @@ def test_aircraft_is_registered_with_a_governor_and_a_fetch() -> None:
     assert module.fetch is not None
     assert module.governor is not None
     assert module.governor.floor_seconds == module.manifest.cadence_seconds
+
+
+def streaming_module(**changes: Any) -> Module:
+    async def run(pool: Pool, settings: Settings, stop: Stop) -> None:
+        return None
+
+    manifest = entity_manifest(cadence_seconds=0, heartbeat_seconds=60)
+    parts: dict[str, Any] = {
+        "manifest": manifest,
+        "fetch": None,
+        "normalize_entities": lambda raw, at: [],
+        "stream": run,
+    }
+    parts.update(changes)
+    return Module(
+        parts["manifest"],
+        parts["fetch"],
+        normalize_entities=parts["normalize_entities"],
+        stream=parts["stream"],
+        governor=parts.get("governor"),
+    )
+
+
+def test_vessels_stream_and_nothing_else_does() -> None:
+    streaming = [m.id for m in REGISTRY.values() if m.stream is not None]
+    assert streaming == ["vessels"]
+    vessels = REGISTRY["vessels"]
+    assert vessels.fetch is None
+    assert vessels.manifest.cadence_seconds == 0
+    assert vessels.manifest.heartbeat_seconds is not None
+    assert vessels.key_missing(
+        Settings(database_url="postgresql://t:t@127.0.0.1:1/t", _env_file=None)
+    )
+
+
+def test_a_streaming_module_is_accepted() -> None:
+    build_registry([streaming_module()])
+
+
+def test_a_streaming_module_has_no_fetch() -> None:
+    with pytest.raises(RegistryError, match="streams"):
+        build_registry([streaming_module(fetch=no_fetch)])
+
+
+def test_a_streaming_module_needs_a_heartbeat() -> None:
+    manifest = entity_manifest(cadence_seconds=0)
+    with pytest.raises(RegistryError, match="heartbeat"):
+        build_registry([streaming_module(manifest=manifest)])
+
+
+def test_a_heartbeat_without_a_stream_is_refused() -> None:
+    manifest = entity_manifest(cadence_seconds=0, heartbeat_seconds=60)
+    quiet = Module(manifest, None, normalize_entities=lambda raw, at: [])
+    with pytest.raises(RegistryError, match="heartbeat"):
+        build_registry([quiet])
+
+
+def test_a_heartbeat_belongs_to_unpolled_entity_modules() -> None:
+    with pytest.raises(ValidationError, match="heartbeat_seconds"):
+        entity_manifest(cadence_seconds=30, heartbeat_seconds=60)
+    with pytest.raises(ValidationError, match="heartbeat_seconds"):
+        ModuleManifest.model_validate(manifest_data(heartbeat_seconds=60))

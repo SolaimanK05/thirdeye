@@ -264,11 +264,32 @@ describe("aircraftSelection", () => {
     ).toEqual(["center"]);
   });
 
+  test("offers follow only when the module moves and there is a fix", () => {
+    const options = { ...OPTIONS, canFollow: true };
+    expect(aircraftSelection(DETAIL, NOW, options).actions).toEqual([
+      "star",
+      "follow",
+      "center",
+    ]);
+    expect(
+      aircraftSelection({ ...DETAIL, last_observation: null }, NOW, options)
+        .actions,
+    ).toEqual(["star", "center"]);
+    expect(selection.actions).not.toContain("follow");
+  });
+
+  test("shows whether it is following", () => {
+    expect(selection.following).toBe(false);
+    expect(
+      aircraftSelection(DETAIL, NOW, { ...OPTIONS, following: true }).following,
+    ).toBe(true);
+  });
+
   test("the registry uses this panel for the aircraft module", () => {
     expect(entitySelectionFor("aircraft", DETAIL, NOW, OPTIONS).kind).toBe(
       "AIRCRAFT",
     );
-    expect(entitySelectionFor("vessels", DETAIL, NOW, OPTIONS).kind).toBe(
+    expect(entitySelectionFor("satellites", DETAIL, NOW, OPTIONS).kind).toBe(
       "AIRCRAFT",
     );
   });

@@ -3,13 +3,18 @@ import type {
   EntityRow,
   EventDetail,
   EventRow,
+  FixOut,
 } from "@/api/client";
 import type {
   ClusterInfo,
   LayerSizing,
   Marker,
 } from "@/components/console/markers";
-import type { Selection, ZoomLevel } from "@/components/console/types";
+import type {
+  Selection,
+  SelectionChart,
+  ZoomLevel,
+} from "@/components/console/types";
 import { aircraftRefine } from "./aircraft/refine";
 import { aircraftMarkers, aircraftSizing } from "./aircraft/render";
 import { aircraftSelection } from "./aircraft/selection";
@@ -22,6 +27,10 @@ import { portRefine } from "./ports/refine";
 import { portMarkers } from "./ports/render";
 import { portSelection } from "./ports/selection";
 import type { RefineControl, RefineSpec } from "./refine";
+import { speedHistory } from "./vessels/history";
+import { vesselRefine } from "./vessels/refine";
+import { vesselMarkers, vesselSizing } from "./vessels/render";
+import { vesselSelection } from "./vessels/selection";
 import { fireRefine } from "./wildfires/refine";
 import { fireMarkers } from "./wildfires/render";
 import { fireSelection } from "./wildfires/selection";
@@ -72,6 +81,7 @@ export type EntityView = {
   ) => Selection;
   refine?: RefineSpec<EntityRow>;
   sizing?: LayerSizing;
+  history?: (fixes: readonly FixOut[]) => SelectionChart | undefined;
 };
 
 export const ENTITY_VIEWS: Readonly<Record<string, EntityView>> = {
@@ -80,6 +90,13 @@ export const ENTITY_VIEWS: Readonly<Record<string, EntityView>> = {
     selection: aircraftSelection,
     refine: aircraftRefine,
     sizing: aircraftSizing,
+  },
+  vessels: {
+    markers: vesselMarkers,
+    selection: vesselSelection,
+    refine: vesselRefine,
+    sizing: vesselSizing,
+    history: speedHistory,
   },
   ports: {
     markers: portMarkers,

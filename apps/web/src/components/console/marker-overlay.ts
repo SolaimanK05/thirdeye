@@ -12,6 +12,7 @@ import {
   type Marker,
   type MarkerGlyph,
   type MarkerSizing,
+  POSITION_STRIDE,
 } from "./markers";
 
 export type MarkerPalette = {
@@ -29,8 +30,15 @@ type Placed = {
 };
 
 type Layer = {
+  markers: readonly Marker[];
   placed: Placed[];
   stale: boolean;
+  rotation: Float32Array;
+  faded: Uint8Array;
+  fadedCount: number;
+  lon: Float64Array;
+  lat: Float64Array;
+  drawn: boolean;
   sizing: LayerSizing | undefined;
   sized: MarkerSizing | undefined;
   x: Float32Array;
@@ -39,6 +47,8 @@ type Layer = {
 };
 
 const STALE_ALPHA = 0.5;
+const CRUMB_RADIUS = 2.4;
+const CRUMB_MIN_ALPHA = 0.4;
 const LINE_WIDTH = 1.5;
 const BRACKET_GAP = 6;
 const BRACKET_ARM = 5;
@@ -54,6 +64,7 @@ const NAME_PAD_X = 3;
 const NAME_HEIGHT = 15;
 const NAME_LIMIT = 120;
 const NAME_WIDTH_CACHE_MAX = 5000;
+const COUNT_REPORT_MS = 1000;
 
 type NameLabel = LabelCandidate & {
   text: string;
@@ -215,6 +226,37 @@ function planePath(
   ctx.closePath();
 }
 
+const SHIP_OUTLINE: readonly (readonly [number, number])[] = [
+  [0, -0.5],
+  [0.2, -0.15],
+  [0.2, 0.38],
+  [0.12, 0.5],
+  [-0.12, 0.5],
+  [-0.2, 0.38],
+  [-0.2, -0.15],
+];
+
+function shipPath(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  size: number,
+  rotation: number,
+) {
+  const angle = (rotation * Math.PI) / 180;
+  const sin = Math.sin(angle);
+  const cos = Math.cos(angle);
+  SHIP_OUTLINE.forEach(([px, py], index) => {
+    const dx = px * size;
+    const dy = py * size;
+    const sx = x + dx * cos - dy * sin;
+    const sy = y + dx * sin + dy * cos;
+    if (index === 0) ctx.moveTo(sx, sy);
+    else ctx.lineTo(sx, sy);
+  });
+  ctx.closePath();
+}
+
 function dotPath(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -241,12 +283,15 @@ function glyphPath(
   y: number,
 ) {
   if (glyph === "plane") planePath(ctx, x, y, size, rotation);
+  else if (glyph === "ship") shipPath(ctx, x, y, size, rotation);
   else if (glyph === "dot") dotPath(ctx, x, y, size);
   else if (glyph === "flame") flamePath(ctx, x, y, size);
   else if (glyph === "flame-ring") flameRingPath(ctx, x, y, size);
   else if (glyph === "square") squarePath(ctx, x, y, size);
   else trianglePath(ctx, x, y, size);
 }
+
+export type OverlayChange = "layer" | "visibility";
 
 export type InViewReport = (counts: Readonly<Record<string, number>>) => void;
 
@@ -267,13 +312,20 @@ export class MarkerOverlay {
   private readonly palette: MarkerPalette;
   private readonly layers = new Map<string, Layer>();
   private readonly scratch = new Cartesian2();
+  private crumbs: readonly { position: Cartesian3; scaled: Cartesian3 }[] = [];
   private readonly camera = new Cartesian3();
   private readonly removeListener: () => void;
   private readonly hidden = new Set<string>();
   private readonly report: InViewReport | undefined;
   private counts: Readonly<Record<string, number>> = {};
+  private latestCounts: Readonly<Record<string, number>> = {};
+  private lastReportAt = Number.NEGATIVE_INFINITY;
+  private reportTimer: ReturnType<typeof setTimeout> | null = null;
   private selectedId: string | null = null;
   private readonly nameWidths = new Map<string, number>();
+  private readonly listeners = new Set<
+    (moduleId: string, change: OverlayChange) => void
+  >();
 
   constructor(
     widget: CesiumWidget,
@@ -299,26 +351,109 @@ export class MarkerOverlay {
     const previous = this.layers.get(moduleId);
     const placed = placeAll(markers, previous?.placed);
     this.layers.set(moduleId, {
+      markers,
       placed,
       stale,
+      rotation: new Float32Array(placed.length).fill(Number.NaN),
+      faded: new Uint8Array(placed.length),
+      fadedCount: 0,
+      lon: Float64Array.from(placed, (p) => p.marker.lon),
+      lat: Float64Array.from(placed, (p) => p.marker.lat),
+      drawn: false,
       sizing,
       sized: previous?.sized,
       x: new Float32Array(placed.length),
       y: new Float32Array(placed.length),
       visible: new Uint8Array(placed.length),
     });
+    this.notify(moduleId, "layer");
     this.widget.scene.requestRender();
   }
 
   removeLayer(moduleId: string) {
-    if (this.layers.delete(moduleId)) this.widget.scene.requestRender();
+    if (!this.layers.delete(moduleId)) return;
+    this.notify(moduleId, "layer");
+    this.widget.scene.requestRender();
   }
 
   setVisible(moduleId: string, visible: boolean) {
     if (visible === !this.hidden.has(moduleId)) return;
     if (visible) this.hidden.delete(moduleId);
     else this.hidden.add(moduleId);
+    this.notify(moduleId, "visibility");
     this.widget.scene.requestRender();
+  }
+
+  onChange(
+    listener: (moduleId: string, change: OverlayChange) => void,
+  ): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  markers(moduleId: string): readonly Marker[] | undefined {
+    return this.layers.get(moduleId)?.markers;
+  }
+
+  isVisible(moduleId: string): boolean {
+    return this.layers.has(moduleId) && !this.hidden.has(moduleId);
+  }
+
+  onScreen(moduleId: string): Uint8Array | undefined {
+    const layer = this.layers.get(moduleId);
+    return layer?.drawn ? layer.visible : undefined;
+  }
+
+  invalidate() {
+    this.widget.scene.requestRender();
+  }
+
+  setPositions(moduleId: string, data: Float64Array) {
+    const layer = this.layers.get(moduleId);
+    if (!layer || data.length < layer.placed.length * POSITION_STRIDE) return;
+    const ellipsoid = Ellipsoid.default;
+    let faded = 0;
+    for (let i = 0; i < layer.placed.length; i++) {
+      const at = i * POSITION_STRIDE;
+      const placed = layer.placed[i];
+      let lon = data[at];
+      let lat = data[at + 1];
+      if (Number.isNaN(lon) || Number.isNaN(lat)) {
+        lon = placed.marker.lon;
+        lat = placed.marker.lat;
+      }
+      if (lon !== layer.lon[i] || lat !== layer.lat[i]) {
+        layer.lon[i] = lon;
+        layer.lat[i] = lat;
+        Cartesian3.fromDegrees(lon, lat, 0, ellipsoid, placed.position);
+        ellipsoid.transformPositionToScaledSpace(
+          placed.position,
+          placed.scaled,
+        );
+      }
+      layer.rotation[i] = data[at + 2];
+      const fade = data[at + 3] === 1 ? 1 : 0;
+      layer.faded[i] = fade;
+      faded += fade;
+    }
+    layer.fadedCount = faded;
+  }
+
+  setBreadcrumbs(points: readonly { lon: number; lat: number }[]) {
+    const ellipsoid = Ellipsoid.default;
+    this.crumbs = points.map(({ lon, lat }) => {
+      const position = Cartesian3.fromDegrees(lon, lat, 0, ellipsoid);
+      const scaled = ellipsoid.transformPositionToScaledSpace(
+        position,
+        new Cartesian3(),
+      );
+      return { position, scaled };
+    });
+    this.widget.scene.requestRender();
+  }
+
+  private notify(moduleId: string, change: OverlayChange) {
+    for (const listener of this.listeners) listener(moduleId, change);
   }
 
   setSelected(id: string | null) {
@@ -348,12 +483,36 @@ export class MarkerOverlay {
 
   destroy() {
     this.removeListener();
+    this.listeners.clear();
     this.layers.clear();
     this.hidden.clear();
     this.nameWidths.clear();
+    if (this.reportTimer !== null) clearTimeout(this.reportTimer);
+    this.reportTimer = null;
     this.counts = {};
+    this.latestCounts = {};
     this.report?.({});
     this.context()?.clearRect(0, 0, this.canvas.width, this.canvas.height);
+  }
+
+  private queueReport(counts: Readonly<Record<string, number>>) {
+    this.latestCounts = counts;
+    if (sameCounts(counts, this.counts)) return;
+    const wait = this.lastReportAt + COUNT_REPORT_MS - performance.now();
+    if (wait <= 0) {
+      this.flushReport();
+    } else if (this.reportTimer === null) {
+      this.reportTimer = setTimeout(() => this.flushReport(), wait);
+    }
+  }
+
+  private flushReport() {
+    if (this.reportTimer !== null) clearTimeout(this.reportTimer);
+    this.reportTimer = null;
+    if (sameCounts(this.latestCounts, this.counts)) return;
+    this.counts = this.latestCounts;
+    this.lastReportAt = performance.now();
+    this.report?.(this.counts);
   }
 
   private context(): CanvasRenderingContext2D | null {
@@ -385,6 +544,7 @@ export class MarkerOverlay {
       camera.positionWC,
       this.camera,
     );
+    this.drawCrumbs(ctx, eye);
     let selected: {
       x: number;
       y: number;
@@ -397,6 +557,7 @@ export class MarkerOverlay {
 
     for (const [moduleId, layer] of this.layers) {
       layer.visible.fill(0);
+      layer.drawn = true;
       if (this.hidden.has(moduleId)) continue;
       let inView = 0;
       const special: number[] = [];
@@ -443,10 +604,7 @@ export class MarkerOverlay {
 
     this.drawNames(ctx, names, selected);
 
-    if (!sameCounts(counts, this.counts)) {
-      this.counts = counts;
-      this.report?.(counts);
-    }
+    this.queueReport(counts);
 
     if (selected)
       this.drawSelection(
@@ -458,23 +616,57 @@ export class MarkerOverlay {
       );
   }
 
+  private drawCrumbs(ctx: CanvasRenderingContext2D, eye: Cartesian3) {
+    const count = this.crumbs.length;
+    if (count === 0) return;
+    ctx.fillStyle = this.palette.accent;
+    for (let i = 0; i < count; i++) {
+      const { position, scaled } = this.crumbs[i];
+      if (Cartesian3.dot(scaled, eye) <= 1) continue;
+      const screen = SceneTransforms.worldToWindowCoordinates(
+        this.widget.scene,
+        position,
+        this.scratch,
+      );
+      if (!screen) continue;
+      const newest = count === 1 ? 1 : i / (count - 1);
+      ctx.globalAlpha = CRUMB_MIN_ALPHA + (1 - CRUMB_MIN_ALPHA) * newest;
+      ctx.beginPath();
+      ctx.arc(screen.x, screen.y, CRUMB_RADIUS, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
   private drawLayer(
     ctx: CanvasRenderingContext2D,
     layer: Layer,
     tone: Marker["tone"],
   ) {
-    ctx.globalAlpha = layer.stale ? STALE_ALPHA : 1;
     ctx.strokeStyle = this.toneColour(tone);
     ctx.lineWidth = LINE_WIDTH;
     ctx.lineJoin = "round";
-    ctx.beginPath();
-    for (let i = 0; i < layer.placed.length; i++) {
-      const { marker } = layer.placed[i];
-      if (!layer.visible[i] || marker.tone !== tone) continue;
-      const { glyph, size } = drawnAs(layer, marker);
-      glyphPath(ctx, glyph, size, marker.rotation ?? 0, layer.x[i], layer.y[i]);
+    const split = layer.fadedCount > 0 && !layer.stale;
+    for (let pass = 0; pass < (split ? 2 : 1); pass++) {
+      ctx.globalAlpha = layer.stale || pass === 1 ? STALE_ALPHA : 1;
+      ctx.beginPath();
+      for (let i = 0; i < layer.placed.length; i++) {
+        const { marker } = layer.placed[i];
+        if (!layer.visible[i] || marker.tone !== tone) continue;
+        if (split && layer.faded[i] !== pass) continue;
+        const { glyph, size } = drawnAs(layer, marker);
+        const turned = layer.rotation[i];
+        glyphPath(
+          ctx,
+          glyph,
+          size,
+          Number.isNaN(turned) ? (marker.rotation ?? 0) : turned,
+          layer.x[i],
+          layer.y[i],
+        );
+      }
+      ctx.stroke();
     }
-    ctx.stroke();
     ctx.globalAlpha = 1;
   }
 

@@ -89,6 +89,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/entities/{entity_id}/fixes": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Entity Fixes */
+    get: operations["get_entity_fixes_v1_entities__entity_id__fixes_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/watchlist": {
     parameters: {
       query?: never;
@@ -325,6 +342,34 @@ export interface components {
         [key: string]: components["schemas"]["JsonValue"];
       };
     };
+    /** FixHistory */
+    FixHistory: {
+      /**
+       * Entity Id
+       * Format: uuid
+       */
+      entity_id: string;
+      /** Fixes */
+      fixes: components["schemas"]["FixOut"][];
+    };
+    /** FixOut */
+    FixOut: {
+      /**
+       * T
+       * Format: date-time
+       */
+      t: string;
+      position: components["schemas"]["Position"];
+      /** Sog */
+      sog: number | null;
+      /** Cog */
+      cog: number | null;
+      /** Heading */
+      heading: number | null;
+      /** Alt */
+      alt: number | null;
+      confidence: components["schemas"]["Confidence"];
+    };
     /** Health */
     Health: {
       /**
@@ -401,6 +446,8 @@ export interface components {
       /** Cadence Seconds */
       cadence_seconds: number;
       zoom_range: components["schemas"]["ZoomRange"] | null;
+      /** Render Delay Seconds */
+      render_delay_seconds: number | null;
       /** Requires Key */
       requires_key: boolean;
       /** Key Env */
@@ -427,6 +474,8 @@ export interface components {
       sog: number | null;
       /** Cog */
       cog: number | null;
+      /** Heading */
+      heading?: number | null;
       /** Alt */
       alt: number | null;
       confidence: components["schemas"]["Confidence"];
@@ -813,6 +862,66 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["EntityDetail"];
+        };
+      };
+      /** @description Not allowed */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
+        };
+      };
+      /** @description Invalid request */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
+        };
+      };
+      /** @description Database unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
+        };
+      };
+    };
+  };
+  get_entity_fixes_v1_entities__entity_id__fixes_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        entity_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FixHistory"];
         };
       };
       /** @description Not allowed */

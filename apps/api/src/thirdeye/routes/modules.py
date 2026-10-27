@@ -40,6 +40,7 @@ class ModuleOut(Out):
     enabled: bool
     cadence_seconds: int
     zoom_range: ZoomRange | None
+    render_delay_seconds: int | None
     requires_key: bool
     key_env: str | None
     default_filter: Literal["all", "none"]
@@ -53,9 +54,17 @@ def key_env_name(module: Module, settings: Settings) -> str | None:
     return names[0] if names else None
 
 
-def stale_after(cadence_seconds: int) -> timedelta | None:
+def stale_after(
+    cadence_seconds: int, heartbeat_seconds: int | None = None
+) -> timedelta | None:
     if cadence_seconds == 0:
-        return None
+        if heartbeat_seconds is None:
+            return None
+        return timedelta(
+            seconds=max(
+                STALE_AFTER_CADENCES * heartbeat_seconds, STALE_AFTER_MIN_SECONDS
+            )
+        )
     return timedelta(
         seconds=max(STALE_AFTER_CADENCES * cadence_seconds, STALE_AFTER_MIN_SECONDS)
     )
@@ -73,6 +82,7 @@ def module_state(
     now: datetime,
     *,
     key_missing: bool = False,
+    heartbeat_seconds: int | None = None,
 ) -> HealthState:
     if key_missing:
         return "missing_key"
@@ -82,7 +92,7 @@ def module_state(
         return "cooldown"
     if record.status == "failed":
         return "failed"
-    limit = stale_after(cadence_seconds)
+    limit = stale_after(cadence_seconds, heartbeat_seconds)
     if limit is not None and now - record.fetched_at > limit:
         return "stale"
     if record.record_count == 0:
@@ -96,10 +106,17 @@ def health_out(
     now: datetime,
     *,
     key_missing: bool = False,
+    heartbeat_seconds: int | None = None,
 ) -> HealthOut:
-    limit = stale_after(cadence_seconds)
+    limit = stale_after(cadence_seconds, heartbeat_seconds)
     return HealthOut(
-        state=module_state(record, cadence_seconds, now, key_missing=key_missing),
+        state=module_state(
+            record,
+            cadence_seconds,
+            now,
+            key_missing=key_missing,
+            heartbeat_seconds=heartbeat_seconds,
+        ),
         fetched_at=None if record is None else record.fetched_at,
         record_count=0 if record is None else record.record_count,
         reason=None if record is None else record.reason,
@@ -137,6 +154,7 @@ async def list_modules(
                         min=manifest.zoom_range[0], max=manifest.zoom_range[1]
                     )
                 ),
+                render_delay_seconds=manifest.render_delay_seconds,
                 requires_key=manifest.requires_key,
                 key_env=key_env_name(module, settings),
                 default_filter="all" if module.id in default_on else "none",
@@ -147,6 +165,7 @@ async def list_modules(
                     manifest.cadence_seconds,
                     now,
                     key_missing=module.key_missing(settings),
+                    heartbeat_seconds=manifest.heartbeat_seconds,
                 ),
             )
         )

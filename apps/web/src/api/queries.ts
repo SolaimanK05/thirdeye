@@ -15,6 +15,7 @@ import {
   api,
   type EntityDetail,
   type EventDetail,
+  type FixHistory,
   type Layer,
   type ModuleInfo,
   type SearchResults,
@@ -48,6 +49,7 @@ export const queryKeys = {
     ] as const,
   event: (eventId: string) => ["event", eventId] as const,
   entity: (entityId: string) => ["entity", entityId] as const,
+  fixes: (entityId: string) => ["entity", entityId, "fixes"] as const,
   watchlist: ["watchlist"] as const,
   search: (text: string) => ["search", text] as const,
 };
@@ -92,6 +94,7 @@ export function useLayer(
   moduleId: string,
   cadenceSeconds: number,
   layerQuery: LayerQuery | null = null,
+  enabled = true,
 ) {
   const refresh = refreshSeconds(cadenceSeconds) * SECOND;
   const live = useStreamStatus(streamIsLive);
@@ -108,6 +111,7 @@ export function useLayer(
         }),
       ),
     placeholderData: keepPreviousData,
+    enabled,
     staleTime: refresh,
     refetchInterval: layerRefetchInterval(cadenceSeconds, live),
   });
@@ -150,6 +154,30 @@ export function entityQueryOptions(entityId: string | null) {
 
 export function useEntity(entityId: string | null) {
   return useQuery(entityQueryOptions(entityId));
+}
+
+const FIXES_LIMIT = 120;
+const FIXES_REFRESH = 30 * SECOND;
+
+export function useEntityFixes(entityId: string | null, enabled: boolean) {
+  const on = enabled && entityId !== null;
+  return useQuery({
+    queryKey: queryKeys.fixes(entityId ?? ""),
+    queryFn: async ({ signal }): Promise<FixHistory> =>
+      unwrap(
+        await api.GET("/v1/entities/{entity_id}/fixes", {
+          params: {
+            path: { entity_id: entityId ?? "" },
+            query: { limit: FIXES_LIMIT },
+          },
+          signal,
+        }),
+      ),
+    enabled: on,
+    staleTime: FIXES_REFRESH,
+    refetchInterval: on ? FIXES_REFRESH : false,
+    retry: false,
+  });
 }
 
 export function useWatchlist() {

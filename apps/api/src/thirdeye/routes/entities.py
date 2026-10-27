@@ -1,11 +1,12 @@
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import AwareDatetime, JsonValue
 
 from thirdeye.deps import ReaderDep
 from thirdeye.ontology import Confidence, EntityKind
-from thirdeye.reads import EntityRecord
+from thirdeye.reads import EntityRecord, FixRecord
 from thirdeye.registry import REGISTRY
 from thirdeye.routes.models import (
     Out,
@@ -24,8 +25,24 @@ class ObservationOut(Out):
     position: Position
     sog: float | None
     cog: float | None
+    heading: float | None = None
     alt: float | None
     confidence: Confidence
+
+
+class FixOut(Out):
+    t: AwareDatetime
+    position: Position
+    sog: float | None
+    cog: float | None
+    heading: float | None
+    alt: float | None
+    confidence: Confidence
+
+
+class FixHistory(Out):
+    entity_id: UUID
+    fixes: list[FixOut]
 
 
 class EntityDetail(Out):
@@ -55,6 +72,7 @@ def last_observation(record: EntityRecord) -> ObservationOut | None:
         position=Position(lon=record.obs_lon, lat=record.obs_lat),
         sog=record.obs_sog,
         cog=record.obs_cog,
+        heading=record.obs_heading,
         alt=record.obs_alt,
         confidence=record.obs_confidence,
     )
@@ -83,3 +101,31 @@ async def get_entity(entity_id: UUID, reader: ReaderDep) -> EntityDetail:
     if record is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No entity {entity_id}")
     return entity_detail(record)
+
+
+DEFAULT_FIXES = 120
+MAX_FIXES = 500
+
+
+def fix_out(record: FixRecord) -> FixOut:
+    return FixOut(
+        t=record.t,
+        position=Position(lon=record.lon, lat=record.lat),
+        sog=record.sog,
+        cog=record.cog,
+        heading=record.heading,
+        alt=record.alt,
+        confidence=record.confidence,
+    )
+
+
+@router.get("/entities/{entity_id}/fixes")
+async def get_entity_fixes(
+    entity_id: UUID,
+    reader: ReaderDep,
+    limit: Annotated[int, Query(ge=1, le=MAX_FIXES)] = DEFAULT_FIXES,
+) -> FixHistory:
+    if await reader.entity(entity_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No entity {entity_id}")
+    records = await reader.fixes(entity_id, limit)
+    return FixHistory(entity_id=entity_id, fixes=[fix_out(r) for r in records])

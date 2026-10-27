@@ -2,10 +2,15 @@
 
 import { useCallback, useEffect } from "react";
 import { ApiRequestError, type EntityDetail } from "@/api/client";
-import { useEntity, useEvent, useModules } from "@/api/queries";
+import { useEntity, useEntityFixes, useEvent, useModules } from "@/api/queries";
 import type { StarTarget } from "@/api/watchlist";
 import { entityName } from "@/modules/entity";
-import { entitySelectionFor, selectionFor } from "@/modules/registry";
+import {
+  ENTITY_VIEWS,
+  entitySelectionFor,
+  selectionFor,
+} from "@/modules/registry";
+import { renderedPosition } from "@/state/motion";
 import { type SelectedItem, useSelection } from "@/state/selection";
 import { useStarred } from "@/state/starred";
 import { isPlainKey } from "./hotkeys";
@@ -91,12 +96,20 @@ function EntitySelection({
   item: Extract<SelectedItem, { kind: "entity" }>;
 }) {
   const focusOn = useSelection((state) => state.focusOn);
+  const following = useSelection((state) => state.following);
+  const toggleFollow = useSelection((state) => state.toggleFollow);
   const entity = useEntity(item.id);
   const stars = useStarred();
   const now = useNow();
   const detail = entity.data;
+  const history = ENTITY_VIEWS[item.moduleId]?.history;
+  const fixes = useEntityFixes(item.id, history !== undefined);
   const modules = useModules();
-  const health = modules.data?.find((m) => m.id === item.moduleId)?.health;
+  const moduleInfo = modules.data?.find((m) => m.id === item.moduleId);
+  const health = moduleInfo?.health;
+  const mover =
+    moduleInfo?.enabled === true && moduleInfo.render_delay_seconds != null;
+  const hasFix = detail?.last_observation != null;
   const moduleStale = health?.state === "stale" || health?.state === "cooldown";
   const { toggle: toggleStar, noteOpen, dismissNote } = stars;
 
@@ -107,13 +120,17 @@ function EntitySelection({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!isPlainKey(event, "s")) return;
-      event.preventDefault();
-      toggle();
+      if (isPlainKey(event, "s")) {
+        event.preventDefault();
+        toggle();
+      } else if (isPlainKey(event, "f") && mover && hasFix) {
+        event.preventDefault();
+        toggleFollow();
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [toggle]);
+  }, [toggle, toggleFollow, mover, hasFix]);
 
   useEffect(() => dismissNote, [dismissNote]);
 
@@ -121,8 +138,11 @@ function EntitySelection({
     const selection = entitySelectionFor(item.moduleId, detail, now, {
       starred: stars.isStarred(item.id),
       canStar: stars.ready,
+      canFollow: mover,
+      following,
       stale: moduleStale,
     });
+    const chart = history && fixes.data ? history(fixes.data.fixes) : undefined;
     const position = detail.last_observation?.position;
     return (
       <SelectionDock kind={selection.kind} name={selection.name}>
@@ -147,10 +167,13 @@ function EntitySelection({
           </p>
         )}
         <SelectionDetails
-          selection={selection}
+          selection={chart ? { ...selection, chart } : selection}
           onAction={(action) => {
             if (action === "star") toggle();
-            if (action === "center" && position) focusOn(position);
+            if (action === "follow") toggleFollow();
+            if (action === "center" && position) {
+              focusOn(renderedPosition(item.moduleId, item.id) ?? position);
+            }
           }}
         />
       </SelectionDock>

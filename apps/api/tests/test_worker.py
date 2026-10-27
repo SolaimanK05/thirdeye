@@ -11,11 +11,13 @@ from test_governor import FakeClock
 
 from thirdeye import worker
 from thirdeye.config import Settings
+from thirdeye.db import Pool
 from thirdeye.governor import Fetched, Governor, RateLimited
 from thirdeye.modules.ports import records as ports_records
 from thirdeye.modules.wildfires import records as wildfire_records
 from thirdeye.ontology import EntityReport
 from thirdeye.registry import REGISTRY, Fetch, Module
+from thirdeye.streams import Stop, StreamRunner
 
 PORTS_FIXTURE = Path(__file__).parents[1] / "src/thirdeye/modules/ports/fixture.csv"
 SETTINGS = Settings(database_url="postgresql://t:t@127.0.0.1:1/t", _env_file=None)
@@ -374,3 +376,161 @@ async def test_the_worker_builds_one_governor_per_governed_module(
     assert await worker.run(settings, once=True) == 0
     assert [m for m, _ in recorder.metas] == ["aircraft"]
     assert recorder.entity_writes[0]["module_id"] == "aircraft"
+
+
+def streaming_module(run: StreamRunner) -> Module:
+    base = REGISTRY["vessels"]
+    return Module(
+        base.manifest, None, normalize_entities=lambda raw, at: [], stream=run
+    )
+
+
+class TestStreams:
+    async def test_a_stream_that_returns_is_not_restarted(
+        self, recorder: Recorder
+    ) -> None:
+        calls: list[Stop] = []
+
+        async def run(pool: Pool, settings: Settings, stop: Stop) -> None:
+            calls.append(stop)
+
+        stop = asyncio.Event()
+        await worker.supervise_stream(streaming_module(run), POOL, SETTINGS, stop)
+        assert len(calls) == 1
+        assert recorder.failures == []
+
+    async def test_a_crashing_stream_is_reported_and_restarted(
+        self, recorder: Recorder, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(worker, "backoff_delay", lambda failures: 0.01 * failures)
+        attempts: list[int] = []
+
+        async def run(pool: Pool, settings: Settings, stop: Stop) -> None:
+            attempts.append(1)
+            if len(attempts) < 3:
+                raise RuntimeError("the reader fell over")
+
+        await worker.supervise_stream(
+            streaming_module(run), POOL, SETTINGS, asyncio.Event()
+        )
+        assert len(attempts) == 3
+        assert [reason for _, reason in recorder.failures] == [
+            "RuntimeError: the reader fell over"
+        ] * 2
+
+    async def test_stopping_during_the_wait_ends_the_supervisor(
+        self, recorder: Recorder, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(worker, "backoff_delay", lambda failures: 3600.0)
+
+        async def run(pool: Pool, settings: Settings, stop: Stop) -> None:
+            raise RuntimeError("down")
+
+        stop = asyncio.Event()
+        task = asyncio.create_task(
+            worker.supervise_stream(streaming_module(run), POOL, SETTINGS, stop)
+        )
+        await asyncio.sleep(0.05)
+        stop.set()
+        async with asyncio.timeout(2):
+            await task
+        assert len(recorder.failures) == 1
+
+    async def test_the_secret_is_scrubbed_from_a_stream_failure(
+        self, recorder: Recorder, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(worker, "backoff_delay", lambda failures: 0.0)
+        settings = Settings(
+            database_url="postgresql://t:t@127.0.0.1:1/t",
+            aisstream_api_key=SecretStr("ais-secret"),
+            _env_file=None,
+        )
+        stop = asyncio.Event()
+
+        async def run(pool: Pool, settings: Settings, stop_: Stop) -> None:
+            stop.set()
+            raise RuntimeError("bad key ais-secret")
+
+        await worker.supervise_stream(streaming_module(run), POOL, settings, stop)
+        assert recorder.failures == [("vessels", "RuntimeError: bad key [redacted]")]
+
+    async def test_once_runs_the_stream_for_a_window_then_stops_it(
+        self, recorder: Recorder
+    ) -> None:
+        stopped: list[bool] = []
+
+        async def run(pool: Pool, settings: Settings, stop: Stop) -> None:
+            await stop.wait()
+            stopped.append(True)
+
+        ok = await worker.stream_once(streaming_module(run), POOL, SETTINGS, 0.05)
+        assert ok is True
+        assert stopped == [True]
+
+    async def test_once_reports_a_stream_that_fails(self, recorder: Recorder) -> None:
+        async def run(pool: Pool, settings: Settings, stop: Stop) -> None:
+            raise RuntimeError("no")
+
+        ok = await worker.stream_once(streaming_module(run), POOL, SETTINGS, 0.05)
+        assert ok is False
+        assert len(recorder.failures) == 1
+
+    async def test_the_worker_starts_streams_and_does_not_poll_them(
+        self, recorder: Recorder, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        started: list[str] = []
+
+        async def run(pool: Pool, settings: Settings, stop: Stop) -> None:
+            started.append("vessels")
+            await stop.wait()
+
+        monkeypatch.setitem(REGISTRY, "vessels", streaming_module(run))
+        monkeypatch.setattr(worker, "STREAM_ONCE_SECONDS", 0.05)
+        monkeypatch.setattr(worker, "create_pool", lambda s: PoolStub())
+        settings = Settings(
+            database_url="postgresql://t:t@127.0.0.1:1/t",
+            modules_enabled=["vessels"],
+            aisstream_api_key=SecretStr("k"),
+            _env_file=None,
+        )
+        assert await worker.run(settings, once=True) == 0
+        assert started == ["vessels"]
+
+    async def test_the_worker_skips_a_stream_without_its_key(
+        self, recorder: Recorder, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        started: list[str] = []
+
+        async def run(pool: Pool, settings: Settings, stop: Stop) -> None:
+            started.append("vessels")
+
+        monkeypatch.setitem(REGISTRY, "vessels", streaming_module(run))
+        monkeypatch.setattr(worker, "create_pool", lambda s: PoolStub())
+        settings = Settings(
+            database_url="postgresql://t:t@127.0.0.1:1/t",
+            modules_enabled=["vessels"],
+            _env_file=None,
+        )
+        assert await worker.run(settings, once=True) == 0
+        assert started == []
+
+    async def test_one_failing_stream_does_not_fail_the_others(
+        self, recorder: Recorder, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def run(pool: Pool, settings: Settings, stop: Stop) -> None:
+            raise RuntimeError("no")
+
+        monkeypatch.setitem(REGISTRY, "vessels", streaming_module(run))
+        monkeypatch.setitem(
+            REGISTRY, "earthquakes", module_with(ok_fetch, "earthquakes")
+        )
+        monkeypatch.setattr(worker, "STREAM_ONCE_SECONDS", 0.05)
+        monkeypatch.setattr(worker, "create_pool", lambda s: PoolStub())
+        settings = Settings(
+            database_url="postgresql://t:t@127.0.0.1:1/t",
+            modules_enabled=["earthquakes", "vessels"],
+            aisstream_api_key=SecretStr("k"),
+            _env_file=None,
+        )
+        assert await worker.run(settings, once=True) == 1
+        assert recorder.writes == [("earthquakes", 0)]

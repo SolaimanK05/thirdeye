@@ -18,7 +18,8 @@ import {
   TileMapServiceImageryProvider,
 } from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { useModules } from "@/api/queries";
 import { useInView } from "@/state/in-view";
 import { useSelection } from "@/state/selection";
 import { useViewport } from "@/state/viewport";
@@ -28,6 +29,7 @@ import { isVectorStyle, mapDetailFor } from "./globe-style";
 import { createVectorGlobe, type VectorGlobe } from "./globe-vectors";
 import { LayerMarkers } from "./layer-markers";
 import { MarkerOverlay } from "./marker-overlay";
+import { MotionDriver } from "./motion-driver";
 import type { GlobeStyle } from "./types";
 import {
   cameraHeightKm,
@@ -146,7 +148,11 @@ export default function GlobeCanvas() {
   const markerCanvas = useRef<HTMLCanvasElement>(null);
   const globe = useRef<Globe | null>(null);
   const [overlay, setOverlay] = useState<MarkerOverlay | null>(null);
-  const selectedId = useSelection((state) => state.selected?.id ?? null);
+  const [motion, setMotion] = useState<MotionDriver | null>(null);
+  const { data: modules } = useModules();
+  const selected = useSelection((state) => state.selected);
+  const following = useSelection((state) => state.following);
+  const selectedId = selected?.id ?? null;
   const focus = useSelection((state) => state.focus);
   const { zoomPercent, setZoomPercent, globeStyle, centre, setCentre } =
     useConsole();
@@ -246,7 +252,11 @@ export default function GlobeCanvas() {
       (counts) => useInView.getState().setCounts(counts),
     );
     const stopPointer = watchPointer(widget, markers);
+    const driver = new MotionDriver(widget, markers, () =>
+      onCameraMoved(widget),
+    );
     setOverlay(markers);
+    setMotion(driver);
 
     const removeFov = scene.preRender.addEventListener(fitFov);
     const removeDisc = trackDisc(widget, frameElement);
@@ -258,7 +268,9 @@ export default function GlobeCanvas() {
     return () => {
       useViewport.getState().setBox(null);
       setOverlay(null);
+      setMotion(null);
       stopPointer();
+      driver.destroy();
       markers.destroy();
       removeMoveEnd();
       removeDisc();
@@ -293,6 +305,41 @@ export default function GlobeCanvas() {
   useEffect(() => {
     overlay?.setSelected(selectedId);
   }, [overlay, selectedId]);
+
+  const movers = useMemo(
+    () =>
+      new Map(
+        (modules ?? []).flatMap((module) =>
+          module.enabled && module.render_delay_seconds != null
+            ? [[module.id, module.render_delay_seconds] as const]
+            : [],
+        ),
+      ),
+    [modules],
+  );
+
+  useEffect(() => {
+    motion?.setMovers(movers);
+  }, [motion, movers]);
+
+  useEffect(() => {
+    motion?.setScale(zoomPercent);
+  }, [motion, zoomPercent]);
+
+  const followTarget =
+    following && selected?.kind === "entity" && movers.has(selected.moduleId)
+      ? { moduleId: selected.moduleId, id: selected.id }
+      : null;
+  const followModule = followTarget?.moduleId ?? null;
+  const followId = followTarget?.id ?? null;
+
+  useEffect(() => {
+    motion?.follow(
+      followModule !== null && followId !== null
+        ? { moduleId: followModule, id: followId }
+        : null,
+    );
+  }, [motion, followModule, followId]);
 
   useEffect(() => {
     const camera = globe.current?.widget.camera;

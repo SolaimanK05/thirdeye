@@ -185,6 +185,8 @@ class ModuleManifest(Model):
     retention_seconds: Annotated[int, Field(gt=0)] | None = None
     observation_retention_seconds: Annotated[int, Field(gt=0)] | None = None
     snapshot_window_seconds: Annotated[int, Field(gt=0)] | None = None
+    render_delay_seconds: Annotated[int, Field(gt=0)] | None = None
+    heartbeat_seconds: Annotated[int, Field(gt=0)] | None = None
 
     @model_validator(mode="after")
     def check_kind(self) -> Self:
@@ -201,10 +203,22 @@ class ModuleManifest(Model):
         elif (
             self.observation_retention_seconds is not None
             or self.snapshot_window_seconds is not None
+            or self.render_delay_seconds is not None
         ):
             raise ValueError(
-                "observation_retention_seconds and snapshot_window_seconds "
-                "are only for entity modules"
+                "observation_retention_seconds, snapshot_window_seconds and "
+                "render_delay_seconds are only for entity modules"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def check_heartbeat(self) -> Self:
+        if self.heartbeat_seconds is not None and (
+            self.kind != "entities" or self.cadence_seconds != 0
+        ):
+            raise ValueError(
+                "heartbeat_seconds is only for streaming entity modules, "
+                "which are not polled (cadence_seconds 0)"
             )
         return self
 

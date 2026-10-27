@@ -6,6 +6,7 @@ import httpx
 
 from thirdeye.config import Settings
 from thirdeye.governor import Fetched, GovernorSpec
+from thirdeye.ingest import entity_stream
 from thirdeye.modules.aircraft import manifest as aircraft_manifest
 from thirdeye.modules.aircraft import records as aircraft_records
 from thirdeye.modules.aircraft import source as aircraft_source
@@ -15,10 +16,14 @@ from thirdeye.modules.earthquakes import source as earthquakes_source
 from thirdeye.modules.ports import manifest as ports_manifest
 from thirdeye.modules.ports import records as ports_records
 from thirdeye.modules.ports import source as ports_source
+from thirdeye.modules.vessels import manifest as vessels_manifest
+from thirdeye.modules.vessels import records as vessels_records
+from thirdeye.modules.vessels import source as vessels_source
 from thirdeye.modules.wildfires import manifest as wildfires_manifest
 from thirdeye.modules.wildfires import records as wildfires_records
 from thirdeye.modules.wildfires import source as wildfires_source
 from thirdeye.ontology import EntityReport, Event, ModuleManifest
+from thirdeye.streams import StreamRunner
 
 type Fetch = Callable[[httpx.AsyncClient, Settings], Awaitable[bytes | Fetched]]
 type Normalize = Callable[[bytes, datetime], list[Event]]
@@ -38,6 +43,7 @@ class Module:
     accept: Accept | None = None
     normalize_entities: NormalizeEntities | None = None
     governor: GovernorSpec | None = None
+    stream: StreamRunner | None = None
 
     @property
     def id(self) -> str:
@@ -71,6 +77,19 @@ def check_module(module: Module) -> None:
         module.fetch is None or manifest.cadence_seconds == 0
     ):
         raise RegistryError(f"module {module.id!r} is governed, so it must be polled")
+    if module.stream is not None:
+        if module.fetch is not None or module.normalize_entities is None:
+            raise RegistryError(
+                f"module {module.id!r} streams, so it has no fetch and makes entities"
+            )
+        if manifest.cadence_seconds != 0 or module.governor is not None:
+            raise RegistryError(
+                f"module {module.id!r} streams, so it is not polled or governed"
+            )
+    if (module.stream is None) != (manifest.heartbeat_seconds is None):
+        raise RegistryError(
+            f"module {module.id!r} must have a heartbeat exactly when it streams"
+        )
     if module.fetch is None and manifest.cadence_seconds != 0:
         raise RegistryError(
             f"module {module.id!r} has no fetch, so its cadence must be 0"
@@ -113,6 +132,17 @@ REGISTRY = build_registry(
                 budget=aircraft_source.daily_budget,
                 cost=aircraft_source.credit_cost,
                 floor_seconds=float(aircraft_manifest.MANIFEST.cadence_seconds),
+            ),
+        ),
+        Module(
+            vessels_manifest.MANIFEST,
+            None,
+            normalize_entities=vessels_records.normalize_entities,
+            stream=entity_stream(
+                vessels_manifest.MANIFEST,
+                vessels_source.read,
+                vessels_records.normalize_entities,
+                vessels_source.tuning,
             ),
         ),
     ]

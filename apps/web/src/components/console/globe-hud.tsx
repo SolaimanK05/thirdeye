@@ -1,6 +1,9 @@
 "use client";
 
+import { useModules } from "@/api/queries";
 import { useInView } from "@/state/in-view";
+import { useMotionStatus } from "@/state/motion";
+import { useSelection } from "@/state/selection";
 import { useConsole } from "./console-shell";
 import { formatCentre } from "./geo";
 import { railCounts } from "./status";
@@ -18,6 +21,20 @@ export function GlobeHud() {
     Object.values(state.counts).reduce((sum, count) => sum + count, 0),
   );
   const layers = railCounts(domains, level.level).drawn;
+  const { data: modules } = useModules();
+  const modes = useMotionStatus((state) => state.modes);
+  const selectedModule = useSelection((state) =>
+    state.selected?.kind === "entity" ? state.selected.moduleId : null,
+  );
+  const renderModule =
+    selectedModule !== null && selectedModule in modes
+      ? selectedModule
+      : (Object.keys(modes)[0] ?? null);
+  const renderDelay =
+    renderModule === null
+      ? null
+      : (modules?.find((module) => module.id === renderModule)
+          ?.render_delay_seconds ?? null);
   const scale = scaleBar(zoomPercent);
 
   return (
@@ -27,7 +44,11 @@ export function GlobeHud() {
           {formatKm(altitudeKm(zoomPercent))}, {level.name}
         </span>
         <span>{formatCentre(centre)}</span>
-        <span className="hidden xl:inline">T−30s</span>
+        {renderModule !== null && renderDelay !== null && (
+          <span>
+            RENDER T−{renderDelay}s, {modes[renderModule]}
+          </span>
+        )}
       </div>
 
       <div className="absolute top-5.5 right-6 z-5 hidden flex-col items-end gap-0.75 text-ink-3 text-label tracking-[0.04em] tabular-nums @min-[640px]:flex">

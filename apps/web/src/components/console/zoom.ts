@@ -86,6 +86,10 @@ export function formatKm(km: number): string {
   return `${Math.round(km).toLocaleString("en-US")} km`;
 }
 
+export function kmPerPixel(percent: number): number {
+  return (KM_PER_PX_AT_GLOBAL * 100) / clampZoom(percent);
+}
+
 const SCALE_BAR_PX = 96;
 
 export function scaleBar(percent: number): { label: string; widthPx: number } {

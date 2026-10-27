@@ -3,11 +3,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
+import structlog
 from psycopg import AsyncConnection, sql
 from psycopg.rows import TupleRow
 from psycopg.types.json import Jsonb
 from pydantic import JsonValue
 
+from thirdeye.db import Pool
 from thirdeye.identity import (
     STRONG_KEYS,
     WEAK_KEYS,
@@ -18,7 +20,9 @@ from thirdeye.identity import (
     keys_of,
     resolve,
 )
-from thirdeye.ontology import EntityKind, EntityReport, Event
+from thirdeye.ontology import EntityKind, EntityReport, Event, ModuleManifest
+
+log = structlog.get_logger()
 
 UPSERT_EVENT = """
 insert into event (
@@ -558,3 +562,31 @@ async def prune_observations(
         removed += batch
         if batch < PRUNE_BATCH:
             return removed
+
+
+async def store_entity_batch(
+    pool: Pool,
+    manifest: ModuleManifest,
+    reports: Sequence[EntityReport],
+    fetched_at: datetime,
+    *,
+    prune: bool = True,
+) -> int:
+    keep = manifest.observation_retention_seconds
+    async with pool.connection() as conn:
+        count = await write_entities(
+            conn,
+            manifest.id,
+            manifest.provenance.source_id,
+            reports,
+            fetched_at,
+            latest_only=keep is None,
+            snapshot_window_seconds=manifest.snapshot_window_seconds,
+        )
+        if keep is not None and prune:
+            removed = await prune_observations(
+                conn, manifest.provenance.source_id, keep, fetched_at
+            )
+            if removed:
+                log.info("module.pruned", module=manifest.id, removed=removed)
+    return count

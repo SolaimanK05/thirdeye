@@ -55,12 +55,22 @@ export type SelectionRow = {
 
 export type SelectionAction = "star" | "follow" | "center";
 
+export type ChartPoint = { t: number; v: number };
+
+export type SelectionChart = {
+  label: string;
+  unit: string;
+  points: readonly ChartPoint[];
+};
+
 export type Selection = {
   kind: string;
   name: string;
   subline: string;
   starred: boolean;
+  following?: boolean;
   actions: readonly SelectionAction[];
+  chart?: SelectionChart;
   sections: readonly { label: string; rows: readonly SelectionRow[] }[];
   provenance: {
     source: string;

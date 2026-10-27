@@ -193,6 +193,7 @@ describe("globe", () => {
       "globe-canvas.tsx",
       "globe-vectors.ts",
       "marker-overlay.ts",
+      "motion-driver.ts",
     ]);
     expect(importing(/from "\.\/globe-vectors"/)).toEqual(["globe-canvas.tsx"]);
     expect(
@@ -200,6 +201,7 @@ describe("globe", () => {
         /import \{[^}]*\bMarkerOverlay\b[^}]*\} from "\.\/marker-overlay"/,
       ),
     ).toEqual(["globe-canvas.tsx"]);
+    expect(importing(/from "\.\/motion-driver"/)).toEqual(["globe-canvas.tsx"]);
     expect(readFileSync(join(HERE, "globe-view.tsx"), "utf8")).toMatch(
       /ssr: false/,
     );

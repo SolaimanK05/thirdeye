@@ -11,7 +11,13 @@ from fastapi.testclient import TestClient
 
 from thirdeye import openapi
 from thirdeye.ontology import Confidence, EntityKind, SourceReliability
-from thirdeye.reads import EntityRecord, EventRecord, HealthRecord, SnapshotRecord
+from thirdeye.reads import (
+    EntityRecord,
+    EventRecord,
+    FixRecord,
+    HealthRecord,
+    SnapshotRecord,
+)
 from thirdeye.routes.modules import module_state
 
 type MakeClient = Callable[[bool], TestClient]
@@ -118,6 +124,13 @@ class TestModuleState:
 
 
 class TestModules:
+    def test_an_aircraft_module_reports_its_render_delay(
+        self, make_client: MakeClient
+    ) -> None:
+        body = make_client(True).get("/v1/modules").json()
+        aircraft = next(m for m in body if m["id"] == "aircraft")
+        assert aircraft["render_delay_seconds"] == 105
+
     def test_lists_every_manifest_with_health(
         self, make_client: MakeClient, reader: FakeReader
     ) -> None:
@@ -127,6 +140,7 @@ class TestModules:
         assert quakes["enabled"] is True
         assert quakes["cadence_seconds"] == 60
         assert quakes["zoom_range"] == {"min": 1, "max": 4}
+        assert quakes["render_delay_seconds"] is None
         assert quakes["provenance"]["attribution"] == "USGS"
         assert len(quakes["provenance"]["limitations"]) >= 2
         assert quakes["health"]["record_count"] == 10
@@ -297,7 +311,8 @@ class TestEntities:
         assert body["identifiers"] == {"mmsi": "123456789"}
         assert body["last_observation"]["position"] == {"lon": 91.8, "lat": 22.3}
         assert body["last_observation"]["confidence"] == "observed"
-        assert body["provenance"] is None
+        assert body["provenance"]["source_id"] == "aisstream"
+        assert body["provenance"]["limitations"][0].startswith("AIS is self-reported")
 
     def test_entity_without_fixes(
         self, make_client: MakeClient, reader: FakeReader
@@ -306,6 +321,14 @@ class TestEntities:
         body = make_client(True).get(f"/v1/entities/{ENTITY_ID}").json()
         assert body["last_observation"] is None
 
+    def test_the_latest_fix_carries_the_reported_heading(
+        self, make_client: MakeClient, reader: FakeReader
+    ) -> None:
+        record = vessel(with_fix=True).model_copy(update={"obs_heading": 183.0})
+        reader.entities[ENTITY_ID] = record
+        body = make_client(True).get(f"/v1/entities/{ENTITY_ID}").json()
+        assert body["last_observation"]["heading"] == 183.0
+
     def test_bad_id_is_422(self, make_client: MakeClient) -> None:
         response = make_client(True).get("/v1/entities/not-a-uuid")
         assert response.status_code == 422
@@ -313,6 +336,66 @@ class TestEntities:
     def test_missing_entity_is_404(self, make_client: MakeClient) -> None:
         response = make_client(True).get(f"/v1/entities/{ENTITY_ID}")
         assert response.status_code == 404
+
+
+class TestFixes:
+    def fix(self, minutes: int, speed: float | None) -> FixRecord:
+        return FixRecord(
+            t=NOW - timedelta(minutes=minutes),
+            lon=91.8,
+            lat=22.3,
+            sog=speed,
+            cog=180.0,
+            heading=None,
+            alt=None,
+            confidence=Confidence.OBSERVED,
+        )
+
+    def test_the_retained_fixes_come_back_oldest_first(
+        self, make_client: MakeClient, reader: FakeReader
+    ) -> None:
+        reader.entities[ENTITY_ID] = vessel(with_fix=True)
+        reader.fix_rows[ENTITY_ID] = [
+            self.fix(10, 4.0),
+            self.fix(5, 6.5),
+            self.fix(0, None),
+        ]
+        body = make_client(True).get(f"/v1/entities/{ENTITY_ID}/fixes").json()
+        assert body["entity_id"] == str(ENTITY_ID)
+        assert [f["sog"] for f in body["fixes"]] == [4.0, 6.5, None]
+        assert body["fixes"][0]["position"] == {"lon": 91.8, "lat": 22.3}
+        assert body["fixes"][0]["confidence"] == "observed"
+        assert body["fixes"][0]["t"].startswith("2026-10-14T05:50:00")
+
+    def test_the_default_and_the_limit_are_passed_on(
+        self, make_client: MakeClient, reader: FakeReader
+    ) -> None:
+        reader.entities[ENTITY_ID] = vessel(with_fix=True)
+        client = make_client(True)
+        client.get(f"/v1/entities/{ENTITY_ID}/fixes")
+        client.get(f"/v1/entities/{ENTITY_ID}/fixes?limit=7")
+        assert reader.fix_calls == [(ENTITY_ID, 120), (ENTITY_ID, 7)]
+
+    @pytest.mark.parametrize("limit", [0, -1, 501, "many"])
+    def test_a_bad_limit_is_422(self, make_client: MakeClient, limit: object) -> None:
+        response = make_client(True).get(
+            f"/v1/entities/{ENTITY_ID}/fixes?limit={limit}"
+        )
+        assert response.status_code == 422
+
+    def test_an_entity_with_no_fixes_has_an_empty_history(
+        self, make_client: MakeClient, reader: FakeReader
+    ) -> None:
+        reader.entities[ENTITY_ID] = vessel(with_fix=False)
+        body = make_client(True).get(f"/v1/entities/{ENTITY_ID}/fixes").json()
+        assert body["fixes"] == []
+
+    def test_an_unknown_entity_is_404(self, make_client: MakeClient) -> None:
+        response = make_client(True).get(f"/v1/entities/{ENTITY_ID}/fixes")
+        assert response.status_code == 404
+
+    def test_the_route_is_documented(self) -> None:
+        assert "/v1/entities/{entity_id}/fixes" in openapi.schema()["paths"]
 
 
 class TestOpenApi:

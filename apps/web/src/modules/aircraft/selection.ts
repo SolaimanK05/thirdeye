@@ -149,7 +149,12 @@ export function aircraftSelection(
     name,
     subline: category ?? "Aircraft",
     starred: options.starred,
-    actions: [...(options.canStar ? (["star"] as const) : []), "center"],
+    following: options.following ?? false,
+    actions: [
+      ...(options.canStar ? (["star"] as const) : []),
+      ...(options.canFollow && fix ? (["follow"] as const) : []),
+      "center",
+    ],
     sections: [
       ...(identity.length > 0 ? [{ label: "IDENTITY", rows: identity }] : []),
       { label: "TELEMETRY", rows: telemetry },

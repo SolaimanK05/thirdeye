@@ -22,6 +22,7 @@ from thirdeye.modules.wildfires import records, source
 from thirdeye.modules.wildfires.manifest import MANIFEST
 from thirdeye.modules.wildfires.records import FirmsFormatError, normalize
 from thirdeye.ontology import Confidence
+from thirdeye.redact import scrub
 from thirdeye.registry import REGISTRY, Module
 
 FIXTURE = (
@@ -310,7 +311,7 @@ class TestKeyNeverLeaks:
     def test_scrub_replaces_every_occurrence(self) -> None:
         settings = settings_for(firms_map_key=KEY)
         text = f"a {KEY} b {KEY}"
-        assert worker.scrub(text, settings) == "a [redacted] b [redacted]"
+        assert scrub(text, settings) == "a [redacted] b [redacted]"
 
     def test_secret_values_skips_blank_and_missing(self) -> None:
         assert settings_for().secret_values() == []

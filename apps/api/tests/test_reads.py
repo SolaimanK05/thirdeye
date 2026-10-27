@@ -1,7 +1,7 @@
 import os
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import psycopg
 import pytest
@@ -125,3 +125,55 @@ async def test_entity_without_observations(conn: Conn) -> None:
     assert record is not None
     assert record.obs_t is None
     assert record.obs_confidence is None
+
+
+async def test_fixes_come_back_oldest_first_and_keep_only_the_newest(
+    conn: Conn,
+) -> None:
+    await conn.execute(
+        """
+        insert into entity (id, kind, first_seen, last_seen, source_id, retrieved_at)
+        values (%s, 'vessel', %s, %s, 'aisstream', %s)
+        """,
+        (ENTITY_ID, NOW - timedelta(days=1), NOW, NOW),
+    )
+    for minutes in (40, 30, 20, 10, 0):
+        await conn.execute(
+            """
+            insert into observation (entity_id, t, source_id, geom, sog, cog, heading,
+                                     confidence)
+            values (%s, %s, 'aisstream', st_setsrid(st_makepoint(91.0, 22.3), 4326),
+                    %s, 180, 181, 'observed')
+            """,
+            (ENTITY_ID, NOW - timedelta(minutes=minutes), 40 - minutes),
+        )
+    reader = DbReader(conn)
+    everything = await reader.fixes(ENTITY_ID, 100)
+    assert [f.sog for f in everything] == [0, 10, 20, 30, 40]
+    assert everything[0].heading == 181
+    assert everything[0].confidence is Confidence.OBSERVED
+    assert everything[0].lon == pytest.approx(91.0)
+    newest = await reader.fixes(ENTITY_ID, 2)
+    assert [f.sog for f in newest] == [30, 40]
+    assert await reader.fixes(uuid4(), 5) == []
+
+
+async def test_the_latest_observation_includes_the_heading(conn: Conn) -> None:
+    await conn.execute(
+        """
+        insert into entity (id, kind, first_seen, last_seen, source_id, retrieved_at)
+        values (%s, 'vessel', %s, %s, 'aisstream', %s)
+        """,
+        (ENTITY_ID, NOW, NOW, NOW),
+    )
+    await conn.execute(
+        """
+        insert into observation (entity_id, t, source_id, geom, heading, confidence)
+        values (%s, %s, 'aisstream', st_setsrid(st_makepoint(91.0, 22.3), 4326),
+                77, 'observed')
+        """,
+        (ENTITY_ID, NOW),
+    )
+    record = await DbReader(conn).entity(ENTITY_ID)
+    assert record is not None
+    assert record.obs_heading == 77

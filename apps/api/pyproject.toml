@@ -16,6 +16,7 @@ dependencies = [
     "pydantic>=2.13.5",
     "pydantic-settings>=2.15.0",
     "structlog>=26.1.0",
+    "websockets>=17.2",
 ]
 
 [build-system]

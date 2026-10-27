@@ -56,6 +56,8 @@ export function entityProvenance(
 export type StarOptions = {
   starred: boolean;
   canStar: boolean;
+  canFollow?: boolean;
+  following?: boolean;
   stale?: boolean;
 };
 

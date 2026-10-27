@@ -13,6 +13,13 @@ from thirdeye.modules.earthquakes.manifest import MANIFEST
 from thirdeye.ontology import Domain, ModuleManifest
 from thirdeye.reads import HealthRecord
 from thirdeye.registry import REGISTRY, Module, RegistryError, build_registry
+from thirdeye.routes.modules import (
+    STALE_AFTER_CADENCES,
+    STALE_AFTER_MIN_SECONDS,
+    health_out,
+    module_state,
+    stale_after,
+)
 
 type MakeRegistryClient = Callable[[Settings, Mapping[str, Module]], TestClient]
 
@@ -313,3 +320,64 @@ class TestSettingsKeys:
 
     def test_unknown_env_name_is_not_present(self) -> None:
         assert settings_for().has_key("NOT_A_REAL_KEY") is False
+
+
+class TestStreamHealth:
+    def record(self, age_seconds: float, module_id: str = "ships") -> HealthRecord:
+        return HealthRecord(
+            module_id=module_id,
+            status="ok",
+            fetched_at=datetime.now(UTC) - timedelta(seconds=age_seconds),
+            record_count=10,
+            reason=None,
+            cooldown_until=None,
+        )
+
+    def test_a_polled_module_without_a_heartbeat_keeps_its_rule(self) -> None:
+        assert stale_after(60) == timedelta(
+            seconds=max(60 * STALE_AFTER_CADENCES, STALE_AFTER_MIN_SECONDS)
+        )
+        assert stale_after(0) is None
+
+    def test_a_streaming_module_goes_stale_after_missing_its_heartbeats(self) -> None:
+        limit = stale_after(0, 60)
+        assert limit == timedelta(
+            seconds=max(60 * STALE_AFTER_CADENCES, STALE_AFTER_MIN_SECONDS)
+        )
+
+    def test_a_recent_heartbeat_is_fresh(self) -> None:
+        now = datetime.now(UTC)
+        state = module_state(self.record(30), 0, now, heartbeat_seconds=60)
+        assert state == "fresh"
+
+    def test_a_silent_stream_goes_stale(self) -> None:
+        now = datetime.now(UTC)
+        state = module_state(self.record(3600), 0, now, heartbeat_seconds=60)
+        assert state == "stale"
+
+    def test_an_unpolled_module_with_no_heartbeat_never_goes_stale(self) -> None:
+        now = datetime.now(UTC)
+        assert module_state(self.record(10**7), 0, now) == "fresh"
+
+    def test_the_health_report_says_when_it_goes_stale(self) -> None:
+        now = datetime.now(UTC)
+        limit = stale_after(0, 60)
+        assert limit is not None
+        health = health_out(self.record(30), 0, now, heartbeat_seconds=60)
+        assert health.stale_after_seconds == int(limit.total_seconds())
+
+    def test_the_vessels_module_reports_a_stale_after_time(
+        self, make_registry_client: MakeRegistryClient, reader: FakeReader
+    ) -> None:
+        reader.health_rows = {"vessels": self.record(30, "vessels")}
+        client = make_registry_client(
+            settings_for(modules_enabled=["vessels"], aisstream_api_key=SecretStr("k")),
+            {"vessels": REGISTRY["vessels"]},
+        )
+        [vessels] = listing(client)
+        assert vessels["health"]["state"] == "fresh"
+        assert vessels["health"]["stale_after_seconds"] is not None
+        assert vessels["render_delay_seconds"] == 180
+        assert vessels["cadence_seconds"] == 0
+        assert vessels["kind"] == "entities"
+        assert vessels["key_env"] == "AISSTREAM_API_KEY"

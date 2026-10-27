@@ -11,7 +11,7 @@ import { startStream } from "@/api/stream";
 import { STREAM_PATH, streamHandlers } from "@/api/stream-sync";
 import { useStreamStatus } from "@/state/stream";
 
-const STREAM_URL = `${API_URL}${STREAM_PATH}?entities=`;
+const STREAM_URL = `${API_URL}${STREAM_PATH}`;
 
 function StreamConnection() {
   const queryClient = useQueryClient();

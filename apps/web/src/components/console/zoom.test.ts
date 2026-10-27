@@ -7,6 +7,7 @@ import {
   EARTH_RADIUS_KM,
   formatKm,
   HORIZON_FILL,
+  kmPerPixel,
   levelBounds,
   parseZoom,
   scaleBar,
@@ -125,5 +126,16 @@ describe("scale bar", () => {
     expect(scaleBar(25)).toEqual({ label: "5,000 km", widthPx: 73 });
     expect(scaleBar(5000)).toEqual({ label: "20 km", widthPx: 58 });
     expect(scaleBar(300)).toEqual({ label: "500 km", widthPx: 87 });
+  });
+});
+
+describe("kmPerPixel", () => {
+  test("halves when the zoom doubles", () => {
+    expect(kmPerPixel(200)).toBeCloseTo(kmPerPixel(100) / 2, 9);
+    expect(kmPerPixel(400)).toBeCloseTo(kmPerPixel(100) / 4, 9);
+  });
+
+  test("agrees with the scale bar at 100%", () => {
+    expect(Math.round((kmPerPixel(100) * 58) / 100) * 100).toBe(1000);
   });
 });

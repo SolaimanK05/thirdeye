@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import signal
+import time
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime
 from importlib.metadata import version
@@ -15,7 +16,9 @@ from thirdeye.db import Pool, create_pool
 from thirdeye.governor import Fetched, Governor, RateLimited
 from thirdeye.logs import configure_logging
 from thirdeye.ontology import EntityReport
+from thirdeye.redact import scrub
 from thirdeye.registry import Module, enabled
+from thirdeye.streams import Stop, wait_for_stop
 
 log = structlog.get_logger()
 
@@ -24,14 +27,13 @@ type Sleep = Callable[[float], Awaitable[None]]
 BACKOFF_BASE_SECONDS = 30.0
 BACKOFF_CAP_SECONDS = 900.0
 HTTP_TIMEOUT_SECONDS = 20.0
+STREAM_ONCE_SECONDS = 30.0
+STREAM_STABLE_SECONDS = 60.0
 
 
 def backoff_delay(failures: int) -> float:
     doublings = min(max(0, failures - 1), 16)
     return min(BACKOFF_CAP_SECONDS, BACKOFF_BASE_SECONDS * 2.0**doublings)
-
-
-REDACTED = "[redacted]"
 
 
 class ModuleNotPolled(Exception):
@@ -40,12 +42,6 @@ class ModuleNotPolled(Exception):
 
 class EmptyDownload(Exception):
     pass
-
-
-def scrub(text: str, settings: Settings) -> str:
-    for secret in settings.secret_values():
-        text = text.replace(secret, REDACTED)
-    return text
 
 
 async def run_once(
@@ -102,25 +98,7 @@ async def store_entities(
     reports: Sequence[EntityReport],
     fetched_at: datetime,
 ) -> int:
-    manifest = module.manifest
-    keep = manifest.observation_retention_seconds
-    async with pool.connection() as conn:
-        count = await store.write_entities(
-            conn,
-            module.id,
-            manifest.provenance.source_id,
-            reports,
-            fetched_at,
-            latest_only=keep is None,
-            snapshot_window_seconds=manifest.snapshot_window_seconds,
-        )
-        if keep is not None:
-            removed = await store.prune_observations(
-                conn, manifest.provenance.source_id, keep, fetched_at
-            )
-            if removed:
-                log.info("module.pruned", module=module.id, removed=removed)
-    return count
+    return await store.store_entity_batch(pool, module.manifest, reports, fetched_at)
 
 
 async def report_failure(
@@ -229,6 +207,46 @@ async def run_forever(
         await sleep(delay)
 
 
+async def supervise_stream(
+    module: Module, pool: Pool, settings: Settings, stop: Stop
+) -> None:
+    assert module.stream is not None
+    failures = 0
+    while not stop.is_set():
+        started = time.monotonic()
+        try:
+            await module.stream(pool, settings, stop)
+        except Exception as exc:  # noqa: BLE001 - one module must never stop the others
+            failures = (
+                1
+                if time.monotonic() - started >= STREAM_STABLE_SECONDS
+                else failures + 1
+            )
+            await fail(module, pool, exc, settings)
+            delay = backoff_delay(failures)
+            log.info(
+                "module.backoff", module=module.id, failures=failures, retry_in=delay
+            )
+            if await wait_for_stop(stop, delay):
+                return
+        else:
+            return
+
+
+async def stream_once(
+    module: Module, pool: Pool, settings: Settings, seconds: float
+) -> bool:
+    assert module.stream is not None
+    stop = asyncio.Event()
+    asyncio.get_running_loop().call_later(seconds, stop.set)
+    try:
+        await module.stream(pool, settings, stop)
+    except Exception as exc:  # noqa: BLE001 - one module must never stop the others
+        return await fail(module, pool, exc, settings)
+    log.info("module.ok", module=module.id, streamed_seconds=seconds)
+    return True
+
+
 def http_client() -> httpx.AsyncClient:
     return httpx.AsyncClient(
         timeout=HTTP_TIMEOUT_SECONDS,
@@ -261,21 +279,34 @@ async def run(settings: Settings, *, once: bool) -> int:
     try:
         async with http_client() as client:
             polled = []
+            streamed = []
             for module in modules:
-                if module.fetch is None or module.manifest.cadence_seconds == 0:
+                if module.stream is not None:
+                    log.info("module.streaming", module=module.id)
+                    streamed.append(module)
+                elif module.fetch is None or module.manifest.cadence_seconds == 0:
                     log.info("module.not_polled", module=module.id)
-                    continue
-                polled.append(module)
+                else:
+                    polled.append(module)
             governors = {
                 m.id: None if m.governor is None else m.governor.build(settings)
                 for m in polled
             }
             if once:
                 results = await asyncio.gather(
-                    *(tick(m, pool, client, settings, governors[m.id]) for m in polled)
+                    *(tick(m, pool, client, settings, governors[m.id]) for m in polled),
+                    *(
+                        stream_once(m, pool, settings, STREAM_ONCE_SECONDS)
+                        for m in streamed
+                    ),
                 )
                 return 0 if all(results) else 1
+            stop = asyncio.Event()
             async with asyncio.TaskGroup() as tasks:
+                for module in streamed:
+                    tasks.create_task(
+                        supervise_stream(module, pool, settings, stop), name=module.id
+                    )
                 for module in polled:
                     tasks.create_task(
                         run_forever(

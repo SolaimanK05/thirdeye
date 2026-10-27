@@ -178,11 +178,11 @@ describe("entitySelectionFor", () => {
     expect(entitySelectionFor("ports", PORT, NOW, options).kind).toBe(
       "FACILITY",
     );
-    expect(entitySelectionFor("vessels", PORT, NOW, options).kind).toBe(
+    expect(entitySelectionFor("satellites", PORT, NOW, options).kind).toBe(
       "FACILITY",
     );
     expect(
-      entitySelectionFor("vessels", PORT, NOW, options).sections[0].label,
+      entitySelectionFor("satellites", PORT, NOW, options).sections[0].label,
     ).toBe("IDENTITY");
   });
 });

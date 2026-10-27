@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     firms_min_confidence: Literal["low", "nominal", "high"] = "high"
     firms_min_frp_mw: float = Field(default=0.0, ge=0, allow_inf_nan=False)
     aisstream_api_key: SecretStr | None = None
+    aisstream_bbox: BBox | None = None
+    aisstream_url: str | None = None
+    ais_batch_seconds: float = Field(default=5.0, ge=1, le=60, allow_inf_nan=False)
+    ais_queue_max: int = Field(default=10_000, ge=100, le=1_000_000)
     opensky_client_id: SecretStr | None = None
     opensky_client_secret: SecretStr | None = None
     opensky_bbox: BBox | None = None
@@ -71,7 +75,21 @@ class Settings(BaseSettings):
     def aircraft_bbox(self) -> BBox:
         return self.opensky_bbox or self.region_bbox
 
-    @field_validator("region_bbox", "opensky_bbox")
+    @property
+    def vessel_bbox(self) -> BBox:
+        return self.aisstream_bbox or self.region_bbox
+
+    @field_validator("aisstream_url")
+    @classmethod
+    def check_aisstream_url(cls, url: str | None) -> str | None:
+        if url is None or not url.strip():
+            return None
+        url = url.strip()
+        if not url.startswith(("ws://", "wss://")):
+            raise ValueError("aisstream_url must start with ws:// or wss://")
+        return url
+
+    @field_validator("region_bbox", "opensky_bbox", "aisstream_bbox")
     @classmethod
     def check_bbox(cls, box: BBox | None) -> BBox | None:
         if box is None:

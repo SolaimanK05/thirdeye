@@ -14,6 +14,7 @@ export function moduleInfo(
     enabled: true,
     cadence_seconds: 60,
     zoom_range: { min: 1, max: 4 },
+    render_delay_seconds: null,
     requires_key: false,
     key_env: null,
     default_filter: "all",

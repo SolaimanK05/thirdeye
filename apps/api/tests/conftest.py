@@ -21,6 +21,7 @@ from thirdeye.layers import LayerCache, ViewLoader
 from thirdeye.reads import (
     EntityRecord,
     EventRecord,
+    FixRecord,
     HealthRecord,
     SearchRecord,
     SnapshotRecord,
@@ -55,6 +56,8 @@ class FakeReader:
     health_rows: dict[str, HealthRecord] = field(default_factory=dict)
     events: dict[str, EventRecord] = field(default_factory=dict)
     entities: dict[UUID, EntityRecord] = field(default_factory=dict)
+    fix_rows: dict[UUID, list[FixRecord]] = field(default_factory=dict)
+    fix_calls: list[tuple[UUID, int]] = field(default_factory=list)
     healthy: bool = True
     snapshot_calls: int = 0
     view_rows: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
@@ -129,6 +132,11 @@ class FakeReader:
     async def entity(self, entity_id: UUID) -> EntityRecord | None:
         self.check()
         return self.entities.get(entity_id)
+
+    async def fixes(self, entity_id: UUID, limit: int) -> list[FixRecord]:
+        self.check()
+        self.fix_calls.append((entity_id, limit))
+        return self.fix_rows.get(entity_id, [])[-limit:]
 
 
 @dataclass

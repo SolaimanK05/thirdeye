@@ -11,6 +11,7 @@ MANIFEST = ModuleManifest(
     key_envs=("OPENSKY_CLIENT_ID", "OPENSKY_CLIENT_SECRET"),
     observation_retention_seconds=3_600,
     snapshot_window_seconds=600,
+    render_delay_seconds=105,
     provenance=Provenance(
         source_id="opensky",
         source="OpenSky Network, ADS-B and MLAT state vectors",
