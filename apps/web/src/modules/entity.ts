@@ -7,6 +7,7 @@ import type {
   SelectionRow,
 } from "@/components/console/types";
 import { CONFIDENCE_TAG } from "./confidence";
+import type { OrbitSample } from "./satellites/propagator";
 
 const IDENTIFIER_LABEL: Record<string, string> = {
   mmsi: "MMSI",
@@ -59,6 +60,7 @@ export type StarOptions = {
   canFollow?: boolean;
   following?: boolean;
   stale?: boolean;
+  orbit?: OrbitSample | null;
 };
 
 export function entitySelection(

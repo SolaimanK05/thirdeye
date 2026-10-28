@@ -1,5 +1,6 @@
 import type { ModuleInfo } from "@/api/client";
 import type { StarItem } from "@/api/watchlist";
+import { ENTITY_VIEWS } from "@/modules/registry";
 import type { LayerCap } from "@/state/layer-caps";
 import { HEALTH_FROM_API } from "./module-status";
 import { formatClock, formatMinute, relativeAge } from "./time";
@@ -42,11 +43,14 @@ export function toRow(
   starred: Readonly<Record<string, number>> = {},
 ): ModuleRow {
   const { zoom_range: range, health } = module;
+  const view = ENTITY_VIEWS[module.id];
+  const maxPercent = view?.computed ? view.maxZoomPercent : undefined;
   return {
     id: module.id,
     name: module.name,
     health: HEALTH_FROM_API[health.state],
     zoomRange: range ? [toLevel(range.min, 1), toLevel(range.max, 4)] : null,
+    ...(maxPercent === undefined ? {} : { maxPercent }),
     filter: effectiveFilter(chosen, module),
     loaded: health.record_count,
     starredCount: starred[module.id] ?? 0,

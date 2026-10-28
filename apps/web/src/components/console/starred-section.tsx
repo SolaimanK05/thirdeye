@@ -2,6 +2,7 @@
 
 import { Star } from "lucide-react";
 import { useModules, useWatchlist } from "@/api/queries";
+import { renderedPosition } from "@/state/motion";
 import { useSelection } from "@/state/selection";
 import { useStarred } from "@/state/starred";
 import { cx } from "./cx";
@@ -61,7 +62,10 @@ export function StarredSection() {
                     id: entity.id,
                     moduleId: entity.moduleId,
                   });
-                  if (entity.position) focusOn(entity.position);
+                  const at =
+                    entity.position ??
+                    renderedPosition(entity.moduleId, entity.id);
+                  if (at) focusOn(at);
                 }}
                 className="grid min-h-11 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 py-1 text-left transition-colors duration-120 ease-out hover-fine:bg-well"
               >

@@ -20,6 +20,8 @@ import {
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { useModules } from "@/api/queries";
+import { ENTITY_VIEWS } from "@/modules/registry";
+import { moversFromKey, moversKey } from "@/motion/movers";
 import { useInView } from "@/state/in-view";
 import { useSelection } from "@/state/selection";
 import { useViewport } from "@/state/viewport";
@@ -306,17 +308,8 @@ export default function GlobeCanvas() {
     overlay?.setSelected(selectedId);
   }, [overlay, selectedId]);
 
-  const movers = useMemo(
-    () =>
-      new Map(
-        (modules ?? []).flatMap((module) =>
-          module.enabled && module.render_delay_seconds != null
-            ? [[module.id, module.render_delay_seconds] as const]
-            : [],
-        ),
-      ),
-    [modules],
-  );
+  const moverKey = moversKey(modules);
+  const movers = useMemo(() => moversFromKey(moverKey), [moverKey]);
 
   useEffect(() => {
     motion?.setMovers(movers);
@@ -327,7 +320,10 @@ export default function GlobeCanvas() {
   }, [motion, zoomPercent]);
 
   const followTarget =
-    following && selected?.kind === "entity" && movers.has(selected.moduleId)
+    following &&
+    selected?.kind === "entity" &&
+    (movers.has(selected.moduleId) ||
+      ENTITY_VIEWS[selected.moduleId]?.computed === true)
       ? { moduleId: selected.moduleId, id: selected.id }
       : null;
   const followModule = followTarget?.moduleId ?? null;

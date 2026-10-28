@@ -18,6 +18,7 @@ import {
   type FixHistory,
   type Layer,
   type ModuleInfo,
+  type SatelliteElements,
   type SearchResults,
   unwrap,
   type Watchlist,
@@ -47,6 +48,8 @@ export const queryKeys = {
       query?.cell ?? null,
       query?.minSeverity ?? null,
     ] as const,
+  computed: ["computed"] as const,
+  elementsOf: (moduleId: string) => ["computed", moduleId, "elements"] as const,
   event: (eventId: string) => ["event", eventId] as const,
   entity: (entityId: string) => ["entity", entityId] as const,
   fixes: (entityId: string) => ["entity", entityId, "fixes"] as const,
@@ -113,6 +116,19 @@ export function useLayer(
     placeholderData: keepPreviousData,
     enabled,
     staleTime: refresh,
+    refetchInterval: layerRefetchInterval(cadenceSeconds, live),
+  });
+}
+
+export function useSatelliteElements(cadenceSeconds: number, enabled: boolean) {
+  const live = useStreamStatus(streamIsLive);
+  return useQuery({
+    queryKey: queryKeys.elementsOf("satellites"),
+    queryFn: async ({ signal }): Promise<SatelliteElements> =>
+      unwrap(await api.GET("/v1/satellites/elements", { signal })),
+    enabled,
+    structuralSharing: false,
+    staleTime: refreshSeconds(cadenceSeconds) * SECOND,
     refetchInterval: layerRefetchInterval(cadenceSeconds, live),
   });
 }

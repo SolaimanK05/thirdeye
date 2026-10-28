@@ -18,6 +18,7 @@ import { useConsole } from "./console-shell";
 import type { MarkerOverlay } from "./marker-overlay";
 import { withStars } from "./markers";
 import { effectiveFilter } from "./rail";
+import { SatelliteMarkers } from "./satellite-markers";
 import { boxParam, clusterFor, queryBox } from "./viewport";
 import { zoomLevelFor } from "./zoom";
 
@@ -35,14 +36,23 @@ export function LayerMarkers({ overlay }: Props) {
   const drawable = (modules ?? []).filter(
     (module) => module.enabled && hasView(module),
   );
-  return drawable.map((module) => (
-    <ModuleMarkers
-      key={module.id}
-      module={module}
-      overlay={overlay}
-      starred={starred}
-    />
-  ));
+  return drawable.map((module) =>
+    ENTITY_VIEWS[module.id]?.computed ? (
+      <SatelliteMarkers
+        key={module.id}
+        module={module}
+        overlay={overlay}
+        starred={starred}
+      />
+    ) : (
+      <ModuleMarkers
+        key={module.id}
+        module={module}
+        overlay={overlay}
+        starred={starred}
+      />
+    ),
+  );
 }
 
 function ModuleMarkers({
@@ -101,8 +111,9 @@ function ModuleMarkers({
   const stale =
     module.health.state === "stale" || module.health.state === "cooldown";
   const missingKey = module.health.state === "missing_key";
-  const entityView =
+  const candidate =
     module.kind === "entities" ? ENTITY_VIEWS[module.id] : undefined;
+  const entityView = candidate?.computed ? undefined : candidate;
   const eventView =
     module.kind === "events" ? MODULE_VIEWS[module.id] : undefined;
   const onlyStarred = filter === "starred" && entityView !== undefined;

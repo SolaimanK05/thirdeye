@@ -67,3 +67,28 @@ def test_a_cooldown_minimum_above_the_maximum_fails() -> None:
 def test_a_budget_below_one_fails(value: int) -> None:
     with pytest.raises(ValidationError, match="budget_opensky_credits_day"):
         Settings(database_url=URL, budget_opensky_credits_day=value, _env_file=None)
+
+
+def test_the_satellite_group_defaults_to_the_visual_list() -> None:
+    assert Settings(database_url=URL, _env_file=None).satellite_group == "visual"
+
+
+@pytest.mark.parametrize("group", ["", "two words", "gps/ops", "a" * 41, "x&y=1"])
+def test_a_satellite_group_that_is_not_a_plain_name_fails(group: str) -> None:
+    with pytest.raises(ValidationError, match="satellite_group"):
+        Settings(database_url=URL, satellite_group=group, _env_file=None)
+
+
+def test_a_celestrak_test_url_needs_a_web_scheme_and_blank_means_unset() -> None:
+    with pytest.raises(ValidationError, match="celestrak_url"):
+        Settings(database_url=URL, celestrak_url="ftp://example.test", _env_file=None)
+    assert (
+        Settings(database_url=URL, celestrak_url="  ", _env_file=None).celestrak_url
+        is None
+    )
+    assert (
+        Settings(
+            database_url=URL, celestrak_url=" http://127.0.0.1:9/gp ", _env_file=None
+        ).celestrak_url
+        == "http://127.0.0.1:9/gp"
+    )

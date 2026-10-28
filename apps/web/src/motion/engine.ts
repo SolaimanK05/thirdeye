@@ -10,7 +10,12 @@ export const STRIDE = POSITION_STRIDE;
 const POSITION_EPSILON = 1e-7;
 const HEADING_EPSILON = 0.05;
 const MAX_STEP_SECONDS = 5;
+const METRES_PER_DEGREE = 111_194.9266;
 export const OFFSCREEN_EVERY = 12;
+export const MAX_SKIP = 12;
+export const GROW_BELOW_PX = 0.15;
+export const SHRINK_ABOVE_PX = 0.5;
+export const TARGET_SHIFT_PX = 0.3;
 
 export type MotionTarget = {
   markers: (moduleId: string) => readonly Marker[] | undefined;
@@ -34,21 +39,55 @@ type Buffers = {
   filled: boolean;
 };
 
-function differs(a: Float64Array, b: Float64Array): boolean {
+type Cadence = {
+  skip: number;
+  wait: number;
+  lastMs: number | null;
+};
+
+type Difference = { changed: boolean; shiftMetres: number };
+
+function compare(a: Float64Array, b: Float64Array): Difference {
+  let changed = false;
+  let shiftMetres = 0;
   for (let i = 0; i < a.length; i += STRIDE) {
-    if (
-      Math.abs(a[i] - b[i]) > POSITION_EPSILON ||
-      Math.abs(a[i + 1] - b[i + 1]) > POSITION_EPSILON ||
-      a[i + 3] !== b[i + 3]
-    ) {
-      return true;
+    const dLon = a[i] - b[i];
+    const dLat = a[i + 1] - b[i + 1];
+    if (Number.isNaN(dLon) || Number.isNaN(dLat)) {
+      if (Number.isNaN(a[i]) !== Number.isNaN(b[i])) changed = true;
+      continue;
     }
+    if (
+      Math.abs(dLon) > POSITION_EPSILON ||
+      Math.abs(dLat) > POSITION_EPSILON
+    ) {
+      changed = true;
+      const east = Math.abs(dLon) * Math.cos((a[i + 1] * Math.PI) / 180);
+      const metres = Math.max(east, Math.abs(dLat)) * METRES_PER_DEGREE;
+      if (metres > shiftMetres) shiftMetres = metres;
+    }
+    if (a[i + 3] !== b[i + 3]) changed = true;
     const x = a[i + 2];
     const y = b[i + 2];
-    if (Number.isNaN(x) !== Number.isNaN(y)) return true;
-    if (!Number.isNaN(x) && Math.abs(x - y) > HEADING_EPSILON) return true;
+    if (Number.isNaN(x) !== Number.isNaN(y)) changed = true;
+    else if (!Number.isNaN(x) && Math.abs(x - y) > HEADING_EPSILON) {
+      changed = true;
+    }
   }
-  return false;
+  return { changed, shiftMetres };
+}
+
+export function nextSkip(
+  skip: number,
+  shiftMetres: number,
+  metresPerPixel: number,
+): number {
+  const pixels = shiftMetres / metresPerPixel;
+  if (pixels < GROW_BELOW_PX) return Math.min(MAX_SKIP, skip * 2);
+  if (pixels > SHRINK_ABOVE_PX) {
+    return Math.max(1, Math.floor((skip * TARGET_SHIFT_PX) / pixels));
+  }
+  return skip;
 }
 
 export class MotionEngine {
@@ -61,7 +100,10 @@ export class MotionEngine {
   private readonly modes = new Map<string, MotionMode | null>();
   private readonly shown = new Map<string, number>();
   private readonly pose: Pose = newPose();
-  private lastStepMs: number | null = null;
+  private readonly cadence = new Map<string, Cadence>();
+  private metresPerPixel = 0;
+  private fullRate: string | null = null;
+  private waiting = false;
   private round = 0;
 
   constructor({ target, clock, history, onMode }: MotionEngineOptions) {
@@ -73,6 +115,27 @@ export class MotionEngine {
 
   get movers(): ReadonlyMap<string, number> {
     return this.delays;
+  }
+
+  get pending(): boolean {
+    return this.waiting;
+  }
+
+  setScale(metresPerPixel: number): void {
+    this.metresPerPixel = metresPerPixel;
+    for (const entry of this.cadence.values()) {
+      entry.skip = 1;
+      entry.wait = 0;
+    }
+  }
+
+  setFullRate(moduleId: string | null): void {
+    this.fullRate = moduleId;
+    const entry = moduleId === null ? undefined : this.cadence.get(moduleId);
+    if (entry) {
+      entry.skip = 1;
+      entry.wait = 0;
+    }
   }
 
   setMovers(delays: ReadonlyMap<string, number>): void {
@@ -119,29 +182,48 @@ export class MotionEngine {
 
   step(): boolean {
     const now = this.clock();
-    const elapsed =
-      this.lastStepMs === null
-        ? 0
-        : Math.min(
-            MAX_STEP_SECONDS,
-            Math.max(0, (now - this.lastStepMs) / 1000),
-          );
-    this.lastStepMs = now;
     this.round = (this.round + 1) % OFFSCREEN_EVERY;
     let moved = false;
+    let waiting = false;
     for (const moduleId of this.delays.keys()) {
+      const entry = this.cadenceOf(moduleId);
+      if (entry.wait > 0) {
+        entry.wait -= 1;
+        waiting = true;
+        continue;
+      }
+      const elapsed =
+        entry.lastMs === null
+          ? 0
+          : Math.min(
+              MAX_STEP_SECONDS,
+              Math.max(0, (now - entry.lastMs) / 1000),
+            );
+      entry.lastMs = now;
       if (this.compute(moduleId, now, elapsed)) moved = true;
+      if (entry.wait > 0) waiting = true;
     }
+    this.waiting = waiting;
     if (moved) this.target.invalidate();
     return moved;
   }
 
   reset(): void {
-    this.lastStepMs = null;
+    for (const entry of this.cadence.values()) entry.lastMs = null;
+  }
+
+  private cadenceOf(moduleId: string): Cadence {
+    let entry = this.cadence.get(moduleId);
+    if (!entry) {
+      entry = { skip: 1, wait: 0, lastMs: null };
+      this.cadence.set(moduleId, entry);
+    }
+    return entry;
   }
 
   private release(moduleId: string): void {
     this.buffers.delete(moduleId);
+    this.cadence.delete(moduleId);
     this.setMode(moduleId, null);
   }
 
@@ -222,7 +304,25 @@ export class MotionEngine {
           : "extrapolated",
     );
 
-    const changed = force || !buffers.filled || differs(out, buffers.prev);
+    const first = !buffers.filled;
+    const difference = force || first ? null : compare(out, buffers.prev);
+    const changed = difference === null || difference.changed;
+    const entry = this.cadenceOf(moduleId);
+    if (force) {
+      entry.skip = 1;
+      entry.wait = 0;
+    } else if (
+      difference !== null &&
+      this.metresPerPixel > 0 &&
+      moduleId !== this.fullRate
+    ) {
+      entry.skip = nextSkip(
+        entry.skip,
+        difference.shiftMetres,
+        this.metresPerPixel,
+      );
+      entry.wait = changed ? entry.skip - 1 : 0;
+    }
     if (changed) {
       this.target.setPositions(moduleId, out);
       buffers.prev.set(out);

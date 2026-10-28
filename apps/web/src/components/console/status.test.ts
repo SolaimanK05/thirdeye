@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   drawsAnything,
   everyModuleFilter,
+  inRange,
   moduleNote,
   railCounts,
   rangeNote,
@@ -214,6 +215,38 @@ describe("drawsAnything", () => {
       drawsAnything({ ...quakes, filter: "starred", starredCount: 1 }),
     ).toBe(true);
     expect(drawsAnything({ ...quakes, health: "missing-key" })).toBe(false);
+  });
+});
+
+describe("a module with its own zoom cap", () => {
+  const capped: ModuleRow = {
+    ...quakes,
+    id: "satellites",
+    zoomRange: [1, 3],
+    maxPercent: 300,
+  };
+
+  test("is in range up to the cap and out of it beyond", () => {
+    expect(inRange(capped, 3, 299)).toBe(true);
+    expect(inRange(capped, 3, 300)).toBe(true);
+    expect(inRange(capped, 3, 301)).toBe(false);
+    expect(inRange(capped, 4, 300)).toBe(false);
+    expect(inRange(capped, 3)).toBe(true);
+  });
+
+  test("says the cap in its range note and hides itself beyond it", () => {
+    expect(rangeNote([1, 3], 300)).toBe("auto to 300%");
+    expect(rangeNote([1, 3])).toBe("auto to 999%");
+    expect(moduleNote(capped, 3, 250).text).toBe("auto to 300%");
+    expect(moduleNote({ ...capped, inView: 1 }, 3, 400).text).toBe(
+      "hidden, 1 here",
+    );
+  });
+
+  test("counts as drawn only while inside the cap", () => {
+    const domains = [{ label: "MOVERS", modules: [capped] }];
+    expect(railCounts(domains, 3, 250).drawn).toBe(1);
+    expect(railCounts(domains, 3, 450).drawn).toBe(0);
   });
 });
 

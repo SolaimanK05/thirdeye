@@ -8,7 +8,12 @@ import { Breadcrumbs } from "@/motion/breadcrumbs";
 import { MotionEngine } from "@/motion/engine";
 import { MotionLoop } from "@/motion/loop";
 import { type EntityStore, entityStore } from "@/state/entities";
-import { setMotionProbe, useMotionStatus } from "@/state/motion";
+import {
+  renderedPosition,
+  setMotionProbe,
+  useMotionStatus,
+} from "@/state/motion";
+import { useOrbit } from "@/state/orbit";
 import { useSelection } from "@/state/selection";
 import { serverNowMs } from "@/state/stream";
 import type { MarkerOverlay } from "./marker-overlay";
@@ -35,6 +40,7 @@ export class MotionDriver {
   private readonly handler: ScreenSpaceEventHandler;
   private readonly unobserve: () => void;
   private readonly unsubscribe: () => void;
+  private readonly unorbit: () => void;
   private following: FollowTarget | null = null;
   private readonly crumbs = new Breadcrumbs();
   private metresPerPixel = kmPerPixel(100) * 1000;
@@ -68,6 +74,19 @@ export class MotionDriver {
       this.loop.wake();
     });
 
+    this.unorbit = useOrbit.subscribe((state, previous) => {
+      const target = this.following;
+      if (
+        state.sample === previous.sample ||
+        target === null ||
+        this.engine.movers.has(target.moduleId)
+      ) {
+        return;
+      }
+      this.centre();
+      this.countStep();
+    });
+
     this.handler = new ScreenSpaceEventHandler(widget.scene.canvas);
     for (const input of CANCEL_INPUTS) {
       this.handler.setInputAction(
@@ -97,6 +116,8 @@ export class MotionDriver {
 
   setScale(zoomPercent: number) {
     this.metresPerPixel = kmPerPixel(zoomPercent) * 1000;
+    this.engine.setScale(this.metresPerPixel);
+    this.loop.wake();
   }
 
   follow(target: FollowTarget | null) {
@@ -106,6 +127,7 @@ export class MotionDriver {
       this.following?.moduleId === target.moduleId &&
       this.following.id === target.id;
     this.following = target;
+    this.engine.setFullRate(target?.moduleId ?? null);
     this.stepsSincePublish = 0;
     if (!same && this.crumbs.clear()) this.overlay.setBreadcrumbs([]);
     if (target) {
@@ -120,6 +142,7 @@ export class MotionDriver {
     this.loop.stop();
     this.unobserve();
     this.unsubscribe();
+    this.unorbit();
     this.handler.destroy();
     setMotionProbe(null);
     for (const moduleId of this.engine.movers.keys()) {
@@ -131,19 +154,23 @@ export class MotionDriver {
     const moved = this.engine.step();
     if (this.following && moved) {
       this.centre();
-      this.stepsSincePublish += 1;
-      if (this.stepsSincePublish >= PUBLISH_EVERY_STEPS) {
-        this.stepsSincePublish = 0;
-        this.onMoved();
-      }
+      this.countStep();
     }
-    return moved;
+    return moved || this.engine.pending;
+  }
+
+  private countStep() {
+    this.stepsSincePublish += 1;
+    if (this.stepsSincePublish >= PUBLISH_EVERY_STEPS) {
+      this.stepsSincePublish = 0;
+      this.onMoved();
+    }
   }
 
   private centre() {
     const target = this.following;
     if (!target || this.widget.isDestroyed()) return;
-    const position = this.engine.positionOf(target.moduleId, target.id);
+    const position = renderedPosition(target.moduleId, target.id);
     if (!position) {
       useSelection.getState().stopFollowing();
       return;

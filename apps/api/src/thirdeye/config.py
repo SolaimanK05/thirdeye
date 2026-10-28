@@ -1,5 +1,6 @@
 from functools import lru_cache
 from typing import Literal, NamedTuple, Self
+from urllib.parse import urlsplit
 
 from pydantic import (
     Field,
@@ -16,6 +17,9 @@ class BBox(NamedTuple):
     south: float
     east: float
     north: float
+
+
+WEB_SCHEMES = frozenset({"http", "https"})
 
 
 class Settings(BaseSettings):
@@ -40,6 +44,8 @@ class Settings(BaseSettings):
     aisstream_url: str | None = None
     ais_batch_seconds: float = Field(default=5.0, ge=1, le=60, allow_inf_nan=False)
     ais_queue_max: int = Field(default=10_000, ge=100, le=1_000_000)
+    satellite_group: str = Field(default="visual", pattern=r"^[A-Za-z0-9-]{1,40}$")
+    celestrak_url: str | None = None
     opensky_client_id: SecretStr | None = None
     opensky_client_secret: SecretStr | None = None
     opensky_bbox: BBox | None = None
@@ -87,6 +93,17 @@ class Settings(BaseSettings):
         url = url.strip()
         if not url.startswith(("ws://", "wss://")):
             raise ValueError("aisstream_url must start with ws:// or wss://")
+        return url
+
+    @field_validator("celestrak_url")
+    @classmethod
+    def check_celestrak_url(cls, url: str | None) -> str | None:
+        if url is None or not url.strip():
+            return None
+        url = url.strip()
+        parts = urlsplit(url)
+        if parts.scheme not in WEB_SCHEMES or not parts.netloc:
+            raise ValueError("celestrak_url must be a web address with a host")
         return url
 
     @field_validator("region_bbox", "opensky_bbox", "aisstream_bbox")

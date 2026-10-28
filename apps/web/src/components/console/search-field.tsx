@@ -5,6 +5,7 @@ import { Star } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { SearchHit } from "@/api/client";
 import { MIN_SEARCH_LENGTH, useModules, useSearch } from "@/api/queries";
+import { renderedPosition } from "@/state/motion";
 import { useSelection } from "@/state/selection";
 import { useStarred } from "@/state/starred";
 import { cx } from "./cx";
@@ -101,7 +102,10 @@ export function SearchField({
         ? { kind: "event", id: hit.id, moduleId: hit.module_id }
         : { kind: "entity", id: hit.id, moduleId: hit.module_id },
     );
-    if (hit.position) focusOn(hit.position);
+    const at =
+      hit.position ??
+      (hit.kind === "entity" ? renderedPosition(hit.module_id, hit.id) : null);
+    if (at) focusOn(at);
     input.current?.blur();
     onPick?.();
   };

@@ -246,3 +246,20 @@ def test_a_heartbeat_belongs_to_unpolled_entity_modules() -> None:
         entity_manifest(cadence_seconds=30, heartbeat_seconds=60)
     with pytest.raises(ValidationError, match="heartbeat_seconds"):
         ModuleManifest.model_validate(manifest_data(heartbeat_seconds=60))
+
+
+def test_courtesy_settings_are_only_for_polled_modules() -> None:
+    with pytest.raises(ValidationError, match="polled"):
+        ModuleManifest(**manifest_data(cadence_seconds=0, honor_last_fetch=True))
+    with pytest.raises(ValidationError, match="polled"):
+        ModuleManifest(**manifest_data(cadence_seconds=0, min_retry_seconds=60))
+
+
+def test_a_minimum_retry_interval_must_be_positive() -> None:
+    with pytest.raises(ValidationError):
+        ModuleManifest(**manifest_data(min_retry_seconds=0))
+
+
+def test_only_satellites_follow_the_fetch_courtesy_rules() -> None:
+    courteous = [m.id for m in REGISTRY.values() if m.manifest.honor_last_fetch]
+    assert courteous == ["satellites"]

@@ -26,11 +26,25 @@ export const useMotionStatus = create<MotionStatus>()((set) => ({
 type Probe = (moduleId: string, id: string) => LatLon | null;
 
 let probe: Probe | null = null;
+const extraProbes = new Set<Probe>();
 
 export function setMotionProbe(next: Probe | null): void {
   probe = next;
 }
 
+export function addPositionProbe(next: Probe): () => void {
+  extraProbes.add(next);
+  return () => {
+    extraProbes.delete(next);
+  };
+}
+
 export function renderedPosition(moduleId: string, id: string): LatLon | null {
-  return probe?.(moduleId, id) ?? null;
+  const moved = probe?.(moduleId, id);
+  if (moved) return moved;
+  for (const extra of extraProbes) {
+    const found = extra(moduleId, id);
+    if (found) return found;
+  }
+  return null;
 }

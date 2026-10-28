@@ -289,8 +289,8 @@ describe("aircraftSelection", () => {
     expect(entitySelectionFor("aircraft", DETAIL, NOW, OPTIONS).kind).toBe(
       "AIRCRAFT",
     );
-    expect(entitySelectionFor("satellites", DETAIL, NOW, OPTIONS).kind).toBe(
-      "AIRCRAFT",
-    );
+    expect(
+      entitySelectionFor("unlisted-module", DETAIL, NOW, OPTIONS).kind,
+    ).toBe("AIRCRAFT");
   });
 });

@@ -20,7 +20,7 @@ export function GlobeHud() {
   const inView = useInView((state) =>
     Object.values(state.counts).reduce((sum, count) => sum + count, 0),
   );
-  const layers = railCounts(domains, level.level).drawn;
+  const layers = railCounts(domains, level.level, zoomPercent).drawn;
   const { data: modules } = useModules();
   const modes = useMotionStatus((state) => state.modes);
   const selectedModule = useSelection((state) =>

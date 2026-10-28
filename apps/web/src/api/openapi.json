@@ -719,6 +719,86 @@
         }
       }
     },
+    "/v1/satellites/elements": {
+      "get": {
+        "tags": ["satellites"],
+        "summary": "Get Satellite Elements",
+        "operationId": "get_satellite_elements_v1_satellites_elements_get",
+        "parameters": [
+          {
+            "name": "if-none-match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SatelliteElements"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Not modified"
+          }
+        }
+      }
+    },
     "/v1/search": {
       "get": {
         "tags": ["search"],
@@ -1783,6 +1863,66 @@
           "limitations"
         ],
         "title": "ProvenanceOut"
+      },
+      "SatelliteElement": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "norad_id": {
+            "type": "integer",
+            "title": "Norad Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "omm": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Omm"
+          }
+        },
+        "type": "object",
+        "required": ["id", "norad_id", "name", "omm"],
+        "title": "SatelliteElement"
+      },
+      "SatelliteElements": {
+        "properties": {
+          "fetched_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "satellites": {
+            "items": {
+              "$ref": "#/components/schemas/SatelliteElement"
+            },
+            "type": "array",
+            "title": "Satellites"
+          }
+        },
+        "type": "object",
+        "required": ["fetched_at", "satellites"],
+        "title": "SatelliteElements"
       },
       "SearchHit": {
         "properties": {

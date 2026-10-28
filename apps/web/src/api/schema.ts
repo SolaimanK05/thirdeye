@@ -141,6 +141,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/satellites/elements": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Satellite Elements */
+    get: operations["get_satellite_elements_v1_satellites_elements_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/search": {
     parameters: {
       query?: never;
@@ -502,6 +519,29 @@ export interface components {
       confidence: components["schemas"]["Confidence"];
       /** Limitations */
       limitations: string[];
+    };
+    /** SatelliteElement */
+    SatelliteElement: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Norad Id */
+      norad_id: number;
+      /** Name */
+      name: string | null;
+      /** Omm */
+      omm: {
+        [key: string]: components["schemas"]["JsonValue"];
+      };
+    };
+    /** SatelliteElements */
+    SatelliteElements: {
+      /** Fetched At */
+      fetched_at: string | null;
+      /** Satellites */
+      satellites: components["schemas"]["SatelliteElement"][];
     };
     /** SearchHit */
     SearchHit: {
@@ -1087,6 +1127,71 @@ export interface operations {
     responses: {
       /** @description Successful Response */
       204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Not allowed */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
+        };
+      };
+      /** @description Invalid request */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
+        };
+      };
+      /** @description Database unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorBody"];
+        };
+      };
+    };
+  };
+  get_satellite_elements_v1_satellites_elements_get: {
+    parameters: {
+      query?: never;
+      header?: {
+        "if-none-match"?: string | null;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SatelliteElements"];
+        };
+      };
+      /** @description Not modified */
+      304: {
         headers: {
           [name: string]: unknown;
         };

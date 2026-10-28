@@ -12,6 +12,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 
 from thirdeye.config import Settings, get_settings
 from thirdeye.db import SESSION_OPTIONS, Pool, create_pool
+from thirdeye.elements import ElementsCache
 from thirdeye.errors import register_error_handlers
 from thirdeye.layers import (
     Connect,
@@ -126,6 +127,7 @@ def create_app(
     app = FastAPI(title="Third Eye API", version=APP_VERSION, lifespan=lifespan)
     app.state.settings = settings
     app.state.registry = registry
+    app.state.elements_cache = ElementsCache()
     app.state.enabled_modules = {
         m.id: m for m in enabled(settings.modules_enabled, registry)
     }

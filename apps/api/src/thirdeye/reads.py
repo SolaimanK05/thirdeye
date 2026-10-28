@@ -129,6 +129,13 @@ class EntityRecord(SourceRecord):
     obs_heading: float | None = None
 
 
+class ElementRecord(Record):
+    id: UUID
+    norad_id: int
+    name: str | None
+    omm: dict[str, JsonValue]
+
+
 class FixRecord(Record):
     t: datetime
     lon: float
@@ -331,6 +338,21 @@ left join lateral (
 where e.id = %s
 """
 
+SATELLITE_ELEMENTS = """
+select
+    e.id,
+    (e.identifiers ->> 'norad_id')::bigint as norad_id,
+    e.names[1] as name,
+    e.attrs -> 'omm' as omm
+from entity e
+join source s on s.id = e.source_id
+join layer_snapshot l on l.module_id = s.module_id and l.fetched_at = e.retrieved_at
+where s.module_id = %s
+  and e.identifiers ? 'norad_id'
+  and jsonb_typeof(e.attrs -> 'omm') = 'object'
+order by norad_id
+"""
+
 FIXES = """
 select * from (
     select
@@ -371,6 +393,8 @@ class Reader(Protocol):
     async def entity(self, entity_id: UUID) -> EntityRecord | None: ...
 
     async def fixes(self, entity_id: UUID, limit: int) -> list[FixRecord]: ...
+
+    async def satellite_elements(self, module_id: str) -> list[ElementRecord]: ...
 
 
 class DbReader:
@@ -486,4 +510,9 @@ class DbReader:
     async def fixes(self, entity_id: UUID, limit: int) -> list[FixRecord]:
         async with self.conn.cursor(row_factory=class_row(FixRecord)) as cur:
             await cur.execute(FIXES, (entity_id, limit))
+            return await cur.fetchall()
+
+    async def satellite_elements(self, module_id: str) -> list[ElementRecord]:
+        async with self.conn.cursor(row_factory=class_row(ElementRecord)) as cur:
+            await cur.execute(SATELLITE_ELEMENTS, (module_id,))
             return await cur.fetchall()

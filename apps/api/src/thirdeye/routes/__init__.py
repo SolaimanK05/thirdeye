@@ -7,6 +7,7 @@ from thirdeye.routes import (
     health,
     layers,
     modules,
+    satellites,
     search,
     stream,
     watchlist,
@@ -19,5 +20,6 @@ v1.include_router(layers.router)
 v1.include_router(events.router)
 v1.include_router(entities.router)
 v1.include_router(watchlist.router)
+v1.include_router(satellites.router)
 v1.include_router(search.router)
 v1.include_router(stream.router)

@@ -71,11 +71,18 @@ export function drawsAnything(row: ModuleRow): boolean {
   return row.filter === "all" || row.starredCount > 0;
 }
 
-export function inRange(row: ModuleRow, zoom: ZoomLevel): boolean {
+export function inRange(
+  row: ModuleRow,
+  zoom: ZoomLevel,
+  percent?: number,
+): boolean {
   return (
     row.zoomRange !== null &&
     zoom >= row.zoomRange[0] &&
-    zoom <= row.zoomRange[1]
+    zoom <= row.zoomRange[1] &&
+    (row.maxPercent === undefined ||
+      percent === undefined ||
+      percent <= row.maxPercent)
   );
 }
 
@@ -84,17 +91,29 @@ export type ModuleNote = {
   tone: "ink-3" | "ink-2" | "red" | "amber";
 };
 
-export function rangeNote(range: readonly [ZoomLevel, ZoomLevel]): string {
+export function rangeNote(
+  range: readonly [ZoomLevel, ZoomLevel],
+  maxPercent?: number,
+): string {
   const [min, max] = range;
-  if (min === 1 && max === 4) return "auto, any zoom";
+  if (min === 1 && max === 4 && maxPercent === undefined) {
+    return "auto, any zoom";
+  }
   const from = levelBounds(min).from;
-  const to = levelBounds(max).to;
-  if (max === 4) return `auto from ${from}%`;
+  const to = Math.min(
+    levelBounds(max).to,
+    maxPercent ?? Number.POSITIVE_INFINITY,
+  );
+  if (max === 4 && maxPercent === undefined) return `auto from ${from}%`;
   if (min === 1) return `auto to ${to}%`;
   return `auto ${from}–${to}%`;
 }
 
-export function moduleNote(row: ModuleRow, zoom: ZoomLevel): ModuleNote {
+export function moduleNote(
+  row: ModuleRow,
+  zoom: ZoomLevel,
+  percent?: number,
+): ModuleNote {
   if (row.health === "missing-key") {
     return { text: `needs ${row.missingKey ?? "an API key"}`, tone: "ink-3" };
   }
@@ -110,7 +129,7 @@ export function moduleNote(row: ModuleRow, zoom: ZoomLevel): ModuleNote {
   if (row.zoomRange === null) {
     return { text: "no map layer", tone: "ink-3" };
   }
-  if (!inRange(row, zoom)) {
+  if (!inRange(row, zoom, percent)) {
     return {
       text: row.inView ? `hidden, ${row.inView} here` : "hidden here",
       tone: "ink-2",
@@ -136,7 +155,7 @@ export function moduleNote(row: ModuleRow, zoom: ZoomLevel): ModuleNote {
       tone: "ink-2",
     };
   }
-  return { text: rangeNote(row.zoomRange), tone: "ink-3" };
+  return { text: rangeNote(row.zoomRange, row.maxPercent), tone: "ink-3" };
 }
 
 export function everyModuleFilter(
@@ -156,10 +175,12 @@ export function everyModuleFilter(
 export function railCounts(
   domains: readonly DomainGroup[],
   zoom: ZoomLevel,
+  percent?: number,
 ): { on: number; drawn: number } {
   const modules = domains.flatMap((d) => d.modules).filter(isOn);
   return {
     on: modules.length,
-    drawn: modules.filter((m) => drawsAnything(m) && inRange(m, zoom)).length,
+    drawn: modules.filter((m) => drawsAnything(m) && inRange(m, zoom, percent))
+      .length,
   };
 }

@@ -77,6 +77,10 @@ on conflict (module_id) do update set
     cooldown_until = excluded.cooldown_until
 """
 
+LAST_ATTEMPT = """
+select fetched_at, status::text = 'ok' from module_health where module_id = %s
+"""
+
 UPDATE_META = """
 update module_health set meta = %(meta)s where module_id = %(module_id)s
 """
@@ -257,6 +261,23 @@ async def record_failure(
                 "reason": reason[:500],
             },
         )
+
+
+@dataclass(frozen=True, slots=True)
+class LastAttempt:
+    at: datetime
+    ok: bool
+
+
+async def read_last_attempt(pool: Pool, module_id: str) -> LastAttempt | None:
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(LAST_ATTEMPT, (module_id,))
+        row = await cur.fetchone()
+    if row is None:
+        return None
+    at, ok = row
+    assert isinstance(at, datetime)
+    return LastAttempt(at=at, ok=bool(ok))
 
 
 async def record_cooldown(
@@ -520,13 +541,14 @@ async def write_entities(
             )
             await cur.execute(ENTITY_SNAPSHOT, {"source_id": source_id, "since": since})
             rows = [entity_snapshot_row(row) for row in await cur.fetchall()]
+            record_count = len(rows) if fixes else len(touched)
             await cur.execute(
                 UPSERT_SNAPSHOT,
                 {
                     "module_id": module_id,
                     "payload": Jsonb(rows),
                     "fetched_at": fetched_at,
-                    "record_count": len(rows),
+                    "record_count": record_count,
                 },
             )
             await cur.execute(
@@ -535,13 +557,13 @@ async def write_entities(
                     "module_id": module_id,
                     "status": "ok",
                     "fetched_at": fetched_at,
-                    "record_count": len(rows),
-                    "record_count_update": len(rows),
+                    "record_count": record_count,
+                    "record_count_update": record_count,
                     "reason": None,
                 },
             )
             await cur.execute(NOTIFY_LAYER, (module_id,))
-    return len(rows)
+    return record_count
 
 
 async def prune_observations(

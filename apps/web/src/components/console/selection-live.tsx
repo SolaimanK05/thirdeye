@@ -11,6 +11,7 @@ import {
   selectionFor,
 } from "@/modules/registry";
 import { renderedPosition } from "@/state/motion";
+import { useOrbit } from "@/state/orbit";
 import { type SelectedItem, useSelection } from "@/state/selection";
 import { useStarred } from "@/state/starred";
 import { isPlainKey } from "./hotkeys";
@@ -101,6 +102,9 @@ function EntitySelection({
   const entity = useEntity(item.id);
   const stars = useStarred();
   const now = useNow();
+  const orbit = useOrbit((state) =>
+    state.sample?.id === item.id ? state.sample : null,
+  );
   const detail = entity.data;
   const history = ENTITY_VIEWS[item.moduleId]?.history;
   const fixes = useEntityFixes(item.id, history !== undefined);
@@ -109,7 +113,10 @@ function EntitySelection({
   const health = moduleInfo?.health;
   const mover =
     moduleInfo?.enabled === true && moduleInfo.render_delay_seconds != null;
-  const hasFix = detail?.last_observation != null;
+  const computed = ENTITY_VIEWS[item.moduleId]?.computed === true;
+  const followable = mover || (computed && moduleInfo?.enabled === true);
+  const hasFix =
+    detail?.last_observation != null || (computed && orbit !== null);
   const moduleStale = health?.state === "stale" || health?.state === "cooldown";
   const { toggle: toggleStar, noteOpen, dismissNote } = stars;
 
@@ -123,14 +130,14 @@ function EntitySelection({
       if (isPlainKey(event, "s")) {
         event.preventDefault();
         toggle();
-      } else if (isPlainKey(event, "f") && mover && hasFix) {
+      } else if (isPlainKey(event, "f") && followable && hasFix) {
         event.preventDefault();
         toggleFollow();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [toggle, toggleFollow, mover, hasFix]);
+  }, [toggle, toggleFollow, followable, hasFix]);
 
   useEffect(() => dismissNote, [dismissNote]);
 
@@ -138,9 +145,10 @@ function EntitySelection({
     const selection = entitySelectionFor(item.moduleId, detail, now, {
       starred: stars.isStarred(item.id),
       canStar: stars.ready,
-      canFollow: mover,
+      canFollow: followable,
       following,
       stale: moduleStale,
+      orbit,
     });
     const chart = history && fixes.data ? history(fixes.data.fixes) : undefined;
     const position = detail.last_observation?.position;
@@ -171,9 +179,8 @@ function EntitySelection({
           onAction={(action) => {
             if (action === "star") toggle();
             if (action === "follow") toggleFollow();
-            if (action === "center" && position) {
-              focusOn(renderedPosition(item.moduleId, item.id) ?? position);
-            }
+            const at = renderedPosition(item.moduleId, item.id) ?? position;
+            if (action === "center" && at) focusOn(at);
           }}
         />
       </SelectionDock>

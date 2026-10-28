@@ -471,6 +471,7 @@ describe("client boundary", () => {
       "public-badge.tsx",
       "refine-controls.tsx",
       "refine-panel.tsx",
+      "satellite-markers.tsx",
       "search-field.tsx",
       "selection-dock.tsx",
       "selection-live.tsx",

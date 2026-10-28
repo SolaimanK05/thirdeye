@@ -9,7 +9,7 @@ from conftest import POOL, Recorder
 from pydantic import SecretStr
 from test_governor import FakeClock
 
-from thirdeye import worker
+from thirdeye import store, worker
 from thirdeye.config import Settings
 from thirdeye.db import Pool
 from thirdeye.governor import Fetched, Governor, RateLimited
@@ -534,3 +534,124 @@ class TestStreams:
         )
         assert await worker.run(settings, once=True) == 1
         assert recorder.writes == [("earthquakes", 0)]
+
+
+def satellite_module(fetch: Fetch = ok_fetch) -> Module:
+    base = REGISTRY["satellites"]
+    return Module(
+        base.manifest, fetch, normalize_entities=lambda raw, at: one_port(raw, at)
+    )
+
+
+def attempted(ago: timedelta, *, ok: bool) -> store.LastAttempt:
+    return store.LastAttempt(at=datetime.now(UTC) - ago, ok=ok)
+
+
+async def test_a_module_that_does_not_ask_for_rest_never_looks_up_its_last_attempt(
+    recorder: Recorder,
+) -> None:
+    assert await worker.rest_remaining(module_with(ok_fetch), POOL) == 0.0
+    assert recorder.last_attempt_looks == []
+
+
+async def test_a_module_with_no_history_is_fetched_at_once(recorder: Recorder) -> None:
+    assert await worker.rest_remaining(satellite_module(), POOL) == 0.0
+    assert recorder.last_attempt_looks == ["satellites"]
+
+
+async def test_after_a_good_download_the_rest_of_the_cadence_is_waited_out(
+    recorder: Recorder,
+) -> None:
+    recorder.last_attempt = attempted(timedelta(hours=1), ok=True)
+    rest = await worker.rest_remaining(satellite_module(), POOL)
+    assert rest == pytest.approx(23 * 3600, abs=5)
+
+
+async def test_after_a_failure_the_minimum_retry_interval_is_waited_out(
+    recorder: Recorder,
+) -> None:
+    recorder.last_attempt = attempted(timedelta(minutes=30), ok=False)
+    rest = await worker.rest_remaining(satellite_module(), POOL)
+    assert rest == pytest.approx(90 * 60, abs=5)
+
+
+@pytest.mark.parametrize(
+    "last",
+    [timedelta(days=2), timedelta(hours=25)],
+)
+async def test_an_old_good_download_means_no_rest(
+    recorder: Recorder, last: timedelta
+) -> None:
+    recorder.last_attempt = attempted(last, ok=True)
+    assert await worker.rest_remaining(satellite_module(), POOL) == 0.0
+
+
+async def test_an_old_failure_means_no_rest(recorder: Recorder) -> None:
+    recorder.last_attempt = attempted(timedelta(hours=3), ok=False)
+    assert await worker.rest_remaining(satellite_module(), POOL) == 0.0
+
+
+async def test_a_clock_that_ran_backwards_does_not_lengthen_the_rest(
+    recorder: Recorder,
+) -> None:
+    recorder.last_attempt = attempted(timedelta(hours=-5), ok=True)
+    rest = await worker.rest_remaining(satellite_module(), POOL)
+    assert rest <= 24 * 3600
+
+
+async def test_an_unreadable_history_does_not_stop_the_module(
+    recorder: Recorder,
+) -> None:
+    recorder.last_attempt_error = OSError("database is away")
+    assert await worker.rest_remaining(satellite_module(), POOL) == 0.0
+
+
+async def test_the_forever_loop_rests_before_its_first_download(
+    recorder: Recorder, client: httpx.AsyncClient
+) -> None:
+    recorder.last_attempt = attempted(timedelta(hours=2), ok=True)
+    slept: list[float] = []
+
+    async def capture(seconds: float) -> None:
+        slept.append(seconds)
+        if len(slept) == 2:
+            raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await worker.run_forever(satellite_module(), POOL, client, SETTINGS, capture)
+    assert slept[0] == pytest.approx(22 * 3600, abs=5)
+    assert slept[1] == 86_400
+    assert len(recorder.entity_writes) == 1
+
+
+async def test_failures_wait_at_least_the_minimum_retry_interval(
+    recorder: Recorder, client: httpx.AsyncClient
+) -> None:
+    delays: list[float] = []
+
+    async def capture(seconds: float) -> None:
+        delays.append(seconds)
+        if len(delays) == 3:
+            raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await worker.run_forever(
+            satellite_module(failing_fetch), POOL, client, SETTINGS, capture
+        )
+    assert delays == [7_200, 7_200, 7_200]
+
+
+async def test_a_single_run_leaves_a_resting_module_alone(
+    recorder: Recorder, client: httpx.AsyncClient
+) -> None:
+    recorder.last_attempt = attempted(timedelta(minutes=10), ok=True)
+    assert await worker.tick_if_due(satellite_module(), POOL, client, SETTINGS) is True
+    assert recorder.entity_writes == []
+
+
+async def test_a_single_run_downloads_when_the_module_is_due(
+    recorder: Recorder, client: httpx.AsyncClient
+) -> None:
+    recorder.last_attempt = attempted(timedelta(days=3), ok=True)
+    assert await worker.tick_if_due(satellite_module(), POOL, client, SETTINGS) is True
+    assert len(recorder.entity_writes) == 1

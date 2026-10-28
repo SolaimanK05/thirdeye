@@ -40,6 +40,9 @@ export function streamHandlers(
           queryKey: queryKeys.layerOf(moduleId),
         });
       }
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.elementsOf(moduleId),
+      });
       void queryClient.invalidateQueries({ queryKey: queryKeys.modules });
     },
     onResync: () => {
@@ -47,6 +50,7 @@ export function streamHandlers(
         queryKey: queryKeys.layers,
         predicate: (query) => !isEntityModule(query.queryKey[1]),
       });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.computed });
       void queryClient.invalidateQueries({ queryKey: queryKeys.modules });
     },
     onSnapshot: (snapshot) => {

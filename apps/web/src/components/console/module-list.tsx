@@ -173,7 +173,7 @@ export function ModuleList() {
   const { zoomPercent } = useConsole();
   const zoom = zoomLevelFor(zoomPercent).level;
   const { status, domains } = useRail();
-  const { on, drawn } = railCounts(domains, zoom);
+  const { on, drawn } = railCounts(domains, zoom, zoomPercent);
 
   return (
     <>
@@ -223,7 +223,12 @@ export function ModuleList() {
           >
             <ul>
               {domain.modules.map((row) => (
-                <ModuleRowItem key={row.id} row={row} zoom={zoom} />
+                <ModuleRowItem
+                  key={row.id}
+                  row={row}
+                  zoom={zoom}
+                  percent={zoomPercent}
+                />
               ))}
             </ul>
           </Disclosure>
@@ -235,11 +240,19 @@ export function ModuleList() {
   );
 }
 
-function ModuleRowItem({ row, zoom }: { row: ModuleRow; zoom: ZoomLevel }) {
+function ModuleRowItem({
+  row,
+  zoom,
+  percent,
+}: {
+  row: ModuleRow;
+  zoom: ZoomLevel;
+  percent: number;
+}) {
   const health = HEALTH[row.health];
-  const note = moduleNote(row, zoom);
+  const note = moduleNote(row, zoom, percent);
   const on = isOn(row);
-  const shown = drawsAnything(row) && inRange(row, zoom);
+  const shown = drawsAnything(row) && inRange(row, zoom, percent);
 
   return (
     <li className="grid grid-cols-[24px_minmax(0,1fr)_32px_88px] items-center gap-x-1.5 gap-y-1 py-1.5 pr-2.5 pl-3 transition-colors duration-120 ease-out hover-fine:bg-well lg:grid-cols-[22px_minmax(0,1fr)_28px_80px] xl:grid-cols-[24px_minmax(0,1fr)_32px_88px]">

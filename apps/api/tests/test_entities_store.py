@@ -281,7 +281,7 @@ async def test_a_report_without_a_fix_makes_an_entity_and_no_observation(
     written = await write(conn, [report(("Alpha",), wpi="1", lon=None)])
     assert await count_entities(conn) == 1
     assert await count_fixes(conn) == 0
-    assert written == 0
+    assert written == 1
 
 
 async def test_the_snapshot_is_built_from_the_database(conn: Conn) -> None:

@@ -21,6 +21,7 @@ export type ModuleRow = {
   name: string;
   health: Health;
   zoomRange: readonly [ZoomLevel, ZoomLevel] | null;
+  maxPercent?: number;
   filter: Filter;
   loaded: number;
   starredCount: number;

@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, test } from "vitest";
-import { renderedPosition, setMotionProbe, useMotionStatus } from "./motion";
+import {
+  addPositionProbe,
+  renderedPosition,
+  setMotionProbe,
+  useMotionStatus,
+} from "./motion";
 
 beforeEach(() => {
   useMotionStatus.setState({ modes: {} });
@@ -49,5 +54,23 @@ describe("the rendered position", () => {
     expect(renderedPosition("aircraft", "b")).toBeNull();
     setMotionProbe(null);
     expect(renderedPosition("aircraft", "a")).toBeNull();
+  });
+
+  test("also comes from added probes until they are removed", () => {
+    const remove = addPositionProbe((moduleId, id) =>
+      moduleId === "satellites" && id === "s" ? { lat: 3, lon: 4 } : null,
+    );
+    expect(renderedPosition("satellites", "s")).toEqual({ lat: 3, lon: 4 });
+    expect(renderedPosition("satellites", "t")).toBeNull();
+    remove();
+    expect(renderedPosition("satellites", "s")).toBeNull();
+  });
+
+  test("the motion probe wins over an added one", () => {
+    setMotionProbe(() => ({ lat: 1, lon: 1 }));
+    const remove = addPositionProbe(() => ({ lat: 2, lon: 2 }));
+    expect(renderedPosition("aircraft", "a")).toEqual({ lat: 1, lon: 1 });
+    remove();
+    setMotionProbe(null);
   });
 });

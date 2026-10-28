@@ -178,11 +178,12 @@ describe("entitySelectionFor", () => {
     expect(entitySelectionFor("ports", PORT, NOW, options).kind).toBe(
       "FACILITY",
     );
-    expect(entitySelectionFor("satellites", PORT, NOW, options).kind).toBe(
+    expect(entitySelectionFor("unlisted-module", PORT, NOW, options).kind).toBe(
       "FACILITY",
     );
     expect(
-      entitySelectionFor("satellites", PORT, NOW, options).sections[0].label,
+      entitySelectionFor("unlisted-module", PORT, NOW, options).sections[0]
+        .label,
     ).toBe("IDENTITY");
   });
 });

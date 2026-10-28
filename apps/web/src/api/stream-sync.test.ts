@@ -50,6 +50,27 @@ beforeEach(() => {
   useSelection.setState({ selected: null });
 });
 
+describe("computed element sets", () => {
+  test("a satellites notice invalidates the downloaded element sets and nothing else", () => {
+    const { client, stale, handlers } = setup();
+    const elements = queryKeys.elementsOf("satellites");
+    const other = queryKeys.elementsOf("other");
+    client.setQueryData(elements, { satellites: [] });
+    client.setQueryData(other, { satellites: [] });
+    handlers.onLayer("satellites");
+    expect(stale(elements)).toBe(true);
+    expect(stale(other)).toBe(false);
+  });
+
+  test("a resync invalidates every computed set", () => {
+    const { client, stale, handlers } = setup();
+    const elements = queryKeys.elementsOf("satellites");
+    client.setQueryData(elements, { satellites: [] });
+    handlers.onResync();
+    expect(stale(elements)).toBe(true);
+  });
+});
+
 describe("layer notices", () => {
   test("an event module's notice invalidates its layer and the module list", () => {
     const { aircraft, quakes, stale, handlers } = setup();

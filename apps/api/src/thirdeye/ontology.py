@@ -187,6 +187,19 @@ class ModuleManifest(Model):
     snapshot_window_seconds: Annotated[int, Field(gt=0)] | None = None
     render_delay_seconds: Annotated[int, Field(gt=0)] | None = None
     heartbeat_seconds: Annotated[int, Field(gt=0)] | None = None
+    honor_last_fetch: bool = False
+    min_retry_seconds: Annotated[int, Field(gt=0)] | None = None
+
+    @model_validator(mode="after")
+    def check_polling_courtesy(self) -> Self:
+        if (
+            self.honor_last_fetch or self.min_retry_seconds is not None
+        ) and self.cadence_seconds == 0:
+            raise ValueError(
+                "honor_last_fetch and min_retry_seconds are only for polled "
+                "modules (cadence_seconds above 0)"
+            )
+        return self
 
     @model_validator(mode="after")
     def check_kind(self) -> Self:

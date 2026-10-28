@@ -17,6 +17,8 @@ export type Watchlist = ApiSchemas["Watchlist"];
 export type WatchItem = ApiSchemas["WatchItem"];
 export type SearchHit = ApiSchemas["SearchHit"];
 export type SearchResults = ApiSchemas["SearchResults"];
+export type SatelliteElements = ApiSchemas["SatelliteElements"];
+export type SatelliteElement = ApiSchemas["SatelliteElement"];
 export type ApiError = ApiSchemas["ErrorBody"];
 
 export const API_URL =

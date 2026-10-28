@@ -180,6 +180,42 @@ async def tick(
     return True
 
 
+async def rest_remaining(module: Module, pool: Pool) -> float:
+    manifest = module.manifest
+    if not manifest.honor_last_fetch:
+        return 0.0
+    try:
+        last = await store.read_last_attempt(pool, module.id)
+    except Exception as exc:  # noqa: BLE001 - a failed look-up must not stop the module
+        log.warning("module.last_attempt_unknown", module=module.id, error=str(exc))
+        return 0.0
+    if last is None:
+        return 0.0
+    interval = float(
+        manifest.cadence_seconds if last.ok else manifest.min_retry_seconds or 0
+    )
+    elapsed = max(0.0, (datetime.now(UTC) - last.at).total_seconds())
+    return max(0.0, interval - elapsed)
+
+
+def failure_delay(module: Module, failures: int) -> float:
+    return max(backoff_delay(failures), float(module.manifest.min_retry_seconds or 0))
+
+
+async def tick_if_due(
+    module: Module,
+    pool: Pool,
+    client: httpx.AsyncClient,
+    settings: Settings,
+    governor: Governor | None = None,
+) -> bool:
+    rest = await rest_remaining(module, pool)
+    if rest > 0:
+        log.info("module.resting", module=module.id, until_next_seconds=round(rest))
+        return True
+    return await tick(module, pool, client, settings, governor)
+
+
 async def run_forever(
     module: Module,
     pool: Pool,
@@ -189,6 +225,10 @@ async def run_forever(
     governor: Governor | None = None,
 ) -> None:
     failures = 0
+    rest = await rest_remaining(module, pool)
+    if rest > 0:
+        log.info("module.resting", module=module.id, until_next_seconds=round(rest))
+        await sleep(rest)
     while True:
         succeeded = await tick(module, pool, client, settings, governor)
         failures = 0 if succeeded else failures + 1
@@ -200,7 +240,7 @@ async def run_forever(
         elif succeeded:
             delay = float(module.manifest.cadence_seconds)
         else:
-            delay = backoff_delay(failures)
+            delay = failure_delay(module, failures)
             log.info(
                 "module.backoff", module=module.id, failures=failures, retry_in=delay
             )
@@ -294,7 +334,10 @@ async def run(settings: Settings, *, once: bool) -> int:
             }
             if once:
                 results = await asyncio.gather(
-                    *(tick(m, pool, client, settings, governors[m.id]) for m in polled),
+                    *(
+                        tick_if_due(m, pool, client, settings, governors[m.id])
+                        for m in polled
+                    ),
                     *(
                         stream_once(m, pool, settings, STREAM_ONCE_SECONDS)
                         for m in streamed

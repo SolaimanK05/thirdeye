@@ -16,6 +16,9 @@ from thirdeye.modules.earthquakes import source as earthquakes_source
 from thirdeye.modules.ports import manifest as ports_manifest
 from thirdeye.modules.ports import records as ports_records
 from thirdeye.modules.ports import source as ports_source
+from thirdeye.modules.satellites import manifest as satellites_manifest
+from thirdeye.modules.satellites import records as satellites_records
+from thirdeye.modules.satellites import source as satellites_source
 from thirdeye.modules.vessels import manifest as vessels_manifest
 from thirdeye.modules.vessels import records as vessels_records
 from thirdeye.modules.vessels import source as vessels_source
@@ -133,6 +136,11 @@ REGISTRY = build_registry(
                 cost=aircraft_source.credit_cost,
                 floor_seconds=float(aircraft_manifest.MANIFEST.cadence_seconds),
             ),
+        ),
+        Module(
+            satellites_manifest.MANIFEST,
+            satellites_source.fetch,
+            normalize_entities=satellites_records.normalize_entities,
         ),
         Module(
             vessels_manifest.MANIFEST,

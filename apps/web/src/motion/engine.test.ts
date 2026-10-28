@@ -3,10 +3,15 @@ import type { EntityRow } from "@/api/client";
 import type { Marker } from "@/components/console/markers";
 import type { EntityChange } from "@/state/entities";
 import {
+  GROW_BELOW_PX,
+  MAX_SKIP,
   MotionEngine,
   type MotionTarget,
+  nextSkip,
   OFFSCREEN_EVERY,
+  SHRINK_ABOVE_PX,
   STRIDE,
+  TARGET_SHIFT_PX,
 } from "./engine";
 import { EXTRAPOLATION_CAP_SECONDS } from "./interpolate";
 import { METRES_PER_KNOT } from "./sphere";
@@ -413,5 +418,108 @@ describe("where an entity is drawn", () => {
     engine.ingest(change([row("a", 0, 0)]));
     expect(engine.positionOf("ports", "a")).toBeNull();
     expect(engine.positionOf("aircraft", "zzz")).toBeNull();
+  });
+});
+
+describe("how often each module is stepped", () => {
+  const TICK_SECONDS = 1 / 12;
+  const WIDE = 17_000;
+  const CLOSE = 5;
+
+  function run(
+    engine: MotionEngine,
+    setNow: (seconds: number) => void,
+    steps: number,
+    from = 150,
+  ) {
+    for (let i = 0; i < steps; i++) {
+      setNow(from + i * TICK_SECONDS);
+      engine.step();
+    }
+  }
+
+  test("nextSkip doubles for sub-pixel motion, up to the cap", () => {
+    expect(nextSkip(1, 0.01 * WIDE * GROW_BELOW_PX, WIDE)).toBe(2);
+    expect(nextSkip(8, 0, WIDE)).toBe(MAX_SKIP);
+    expect(nextSkip(MAX_SKIP, 0, WIDE)).toBe(MAX_SKIP);
+  });
+
+  test("nextSkip holds between the two thresholds", () => {
+    const pixels = (GROW_BELOW_PX + SHRINK_ABOVE_PX) / 2;
+    expect(nextSkip(4, pixels * WIDE, WIDE)).toBe(4);
+  });
+
+  test("nextSkip shrinks towards the target shift and never below one", () => {
+    expect(nextSkip(12, 1.2 * WIDE, WIDE)).toBe(
+      Math.floor((12 * TARGET_SHIFT_PX) / 1.2),
+    );
+    expect(nextSkip(2, 100 * WIDE, WIDE)).toBe(1);
+  });
+
+  test("a slow mover at a wide zoom is stepped less and less often", () => {
+    const { engine, written, setNow } = setup();
+    engine.ingest(change([row("a", 0, 0, { sog: 10, cog: 90 })]));
+    engine.setScale(WIDE);
+    run(engine, setNow, 48);
+    expect(written.length).toBeLessThan(12);
+    expect(written.length).toBeGreaterThan(3);
+  });
+
+  test("it reports pending work while waiting so the loop keeps going", () => {
+    const { engine, setNow } = setup();
+    engine.ingest(change([row("a", 0, 0, { sog: 10, cog: 90 })]));
+    engine.setScale(WIDE);
+    run(engine, setNow, 6);
+    setNow(150 + 6 * TICK_SECONDS);
+    const moved = engine.step();
+    expect(moved).toBe(false);
+    expect(engine.pending).toBe(true);
+  });
+
+  test("a mover that is not moving lets the loop stop", () => {
+    const { engine, setNow } = setup();
+    engine.ingest(change([row("a", 0, 1)]));
+    engine.setScale(WIDE);
+    setNow(5000);
+    engine.step();
+    setNow(5001);
+    expect(engine.step()).toBe(false);
+    expect(engine.pending).toBe(false);
+  });
+
+  test("a fast mover at a close zoom is stepped every time", () => {
+    const { engine, written, setNow } = setup();
+    engine.ingest(change([row("a", 0, 0, { sog: 400, cog: 90 })]));
+    engine.setScale(CLOSE);
+    run(engine, setNow, 24);
+    expect(written).toHaveLength(24);
+  });
+
+  test("the followed module is always stepped at full rate", () => {
+    const { engine, written, setNow } = setup();
+    engine.ingest(change([row("a", 0, 0, { sog: 10, cog: 90 })]));
+    engine.setScale(WIDE);
+    engine.setFullRate("aircraft");
+    run(engine, setNow, 24);
+    expect(written).toHaveLength(24);
+    expect(engine.pending).toBe(false);
+  });
+
+  test("a change of zoom brings the module back to every step", () => {
+    const { engine, written, setNow } = setup();
+    engine.ingest(change([row("a", 0, 0, { sog: 10, cog: 90 })]));
+    engine.setScale(WIDE);
+    run(engine, setNow, 48);
+    engine.setScale(CLOSE);
+    const before = written.length;
+    run(engine, setNow, 1, 160);
+    expect(written.length).toBe(before + 1);
+  });
+
+  test("a module without a scale is stepped every time", () => {
+    const { engine, written, setNow } = setup();
+    engine.ingest(change([row("a", 0, 0, { sog: 10, cog: 90 })]));
+    run(engine, setNow, 12);
+    expect(written).toHaveLength(12);
   });
 });

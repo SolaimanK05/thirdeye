@@ -27,6 +27,11 @@ import { portRefine } from "./ports/refine";
 import { portMarkers } from "./ports/render";
 import { portSelection } from "./ports/selection";
 import type { RefineControl, RefineSpec } from "./refine";
+import {
+  SATELLITE_MAX_ZOOM_PERCENT,
+  satelliteSizing,
+} from "./satellites/render";
+import { satelliteSelection } from "./satellites/selection";
 import { speedHistory } from "./vessels/history";
 import { vesselRefine } from "./vessels/refine";
 import { vesselMarkers, vesselSizing } from "./vessels/render";
@@ -69,11 +74,7 @@ export function selectionFor(
     : genericSelection(detail, nowMs);
 }
 
-export type EntityView = {
-  markers: (
-    rows: readonly EntityRow[],
-    context: { level: ZoomLevel },
-  ) => Marker[];
+type EntityViewBase = {
   selection: (
     detail: EntityDetail,
     nowMs: number,
@@ -83,6 +84,21 @@ export type EntityView = {
   sizing?: LayerSizing;
   history?: (fixes: readonly FixOut[]) => SelectionChart | undefined;
 };
+
+export type StoredEntityView = EntityViewBase & {
+  computed?: false;
+  markers: (
+    rows: readonly EntityRow[],
+    context: { level: ZoomLevel },
+  ) => Marker[];
+};
+
+export type ComputedEntityView = EntityViewBase & {
+  computed: true;
+  maxZoomPercent?: number;
+};
+
+export type EntityView = StoredEntityView | ComputedEntityView;
 
 export const ENTITY_VIEWS: Readonly<Record<string, EntityView>> = {
   aircraft: {
@@ -102,6 +118,12 @@ export const ENTITY_VIEWS: Readonly<Record<string, EntityView>> = {
     markers: portMarkers,
     selection: portSelection,
     refine: portRefine,
+  },
+  satellites: {
+    computed: true,
+    maxZoomPercent: SATELLITE_MAX_ZOOM_PERCENT,
+    selection: satelliteSelection,
+    sizing: satelliteSizing,
   },
 };
 

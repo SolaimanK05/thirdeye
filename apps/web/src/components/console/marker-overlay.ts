@@ -1,10 +1,13 @@
 import {
-  Cartesian2,
   Cartesian3,
   type CesiumWidget,
   Ellipsoid,
+  Matrix4,
+  PerspectiveFrustum,
+  SceneMode,
   SceneTransforms,
 } from "cesium";
+import { DotStamper, packColour, type StampMask } from "./dot-stamps";
 import { type LabelCandidate, placeLabels } from "./label-layout";
 import {
   HIT_RADIUS_PX,
@@ -14,6 +17,7 @@ import {
   type MarkerSizing,
   POSITION_STRIDE,
 } from "./markers";
+import { type ScreenPoint, ScreenProjection } from "./projection";
 
 export type MarkerPalette = {
   default: string;
@@ -65,6 +69,9 @@ const NAME_HEIGHT = 15;
 const NAME_LIMIT = 120;
 const NAME_WIDTH_CACHE_MAX = 5000;
 const COUNT_REPORT_MS = 1000;
+export const STAMP_FROM = 400;
+const STAMP_MAX_SIZE = 12;
+const MASK_MARGIN = 4;
 
 type NameLabel = LabelCandidate & {
   text: string;
@@ -311,7 +318,19 @@ export class MarkerOverlay {
   private readonly canvas: HTMLCanvasElement;
   private readonly palette: MarkerPalette;
   private readonly layers = new Map<string, Layer>();
-  private readonly scratch = new Cartesian2();
+  private readonly screen: ScreenPoint = { x: 0, y: 0 };
+  private readonly projection = new ScreenProjection();
+  private readonly viewProjection = new Matrix4();
+  private readonly viewProjectionValues: number[] = new Array<number>(16).fill(
+    0,
+  );
+  private fastProjection = false;
+  private readonly stamper = new DotStamper();
+  private stampCanvas: HTMLCanvasElement | null = null;
+  private stampImage: ImageData | null = null;
+  private readonly masks = new Map<string, StampMask | null>();
+  private readonly colours = new Map<string, number>();
+  private ratio = 1;
   private crumbs: readonly { position: Cartesian3; scaled: Cartesian3 }[] = [];
   private readonly camera = new Cartesian3();
   private readonly removeListener: () => void;
@@ -534,12 +553,14 @@ export class MarkerOverlay {
     const ctx = this.context();
     if (!ctx) return;
     const ratio = this.resize();
+    this.ratio = ratio;
     const width = this.canvas.clientWidth;
     const height = this.canvas.clientHeight;
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     ctx.clearRect(0, 0, width, height);
 
-    const { scene, camera } = this.widget;
+    const { camera } = this.widget;
+    this.prepareProjection(width, height);
     const eye = Ellipsoid.default.transformPositionToScaledSpace(
       camera.positionWC,
       this.camera,
@@ -564,13 +585,9 @@ export class MarkerOverlay {
       for (let i = 0; i < layer.placed.length; i++) {
         const { marker, position, scaled } = layer.placed[i];
         if (Cartesian3.dot(scaled, eye) <= 1) continue;
-        const screen = SceneTransforms.worldToWindowCoordinates(
-          scene,
-          position,
-          this.scratch,
-        );
+        const screen = this.screen;
         if (
-          !screen ||
+          !this.projectPoint(position, screen) ||
           screen.x < -EDGE_MARGIN ||
           screen.y < -EDGE_MARGIN ||
           screen.x > width + EDGE_MARGIN ||
@@ -588,6 +605,10 @@ export class MarkerOverlay {
       }
       counts[moduleId] = inView;
       layer.sized = layer.sizing?.(inView);
+      const stamp = this.crowded(layer);
+      if (stamp) {
+        this.stamper.begin(this.canvas.width, this.canvas.height);
+      }
       for (const i of special) {
         const { marker } = layer.placed[i];
         const { size } = drawnAs(layer, marker);
@@ -599,7 +620,8 @@ export class MarkerOverlay {
           );
         }
       }
-      for (const tone of TONES) this.drawLayer(ctx, layer, tone);
+      for (const tone of TONES) this.drawLayer(ctx, layer, tone, stamp);
+      if (stamp) this.flushStamps(ctx);
     }
 
     this.drawNames(ctx, names, selected);
@@ -616,6 +638,36 @@ export class MarkerOverlay {
       );
   }
 
+  private prepareProjection(width: number, height: number) {
+    const { scene } = this.widget;
+    const { camera } = scene;
+    this.fastProjection =
+      scene.mode === SceneMode.SCENE3D &&
+      camera.frustum instanceof PerspectiveFrustum;
+    if (!this.fastProjection) return;
+    Matrix4.multiply(
+      camera.frustum.projectionMatrix,
+      camera.viewMatrix,
+      this.viewProjection,
+    );
+    Matrix4.toArray(this.viewProjection, this.viewProjectionValues);
+    this.projection.update(this.viewProjectionValues, width, height);
+  }
+
+  private projectPoint(position: Cartesian3, out: ScreenPoint): boolean {
+    if (this.fastProjection) {
+      return this.projection.project(position.x, position.y, position.z, out);
+    }
+    const found = SceneTransforms.worldToWindowCoordinates(
+      this.widget.scene,
+      position,
+    );
+    if (!found) return false;
+    out.x = found.x;
+    out.y = found.y;
+    return true;
+  }
+
   private drawCrumbs(ctx: CanvasRenderingContext2D, eye: Cartesian3) {
     const count = this.crumbs.length;
     if (count === 0) return;
@@ -623,12 +675,8 @@ export class MarkerOverlay {
     for (let i = 0; i < count; i++) {
       const { position, scaled } = this.crumbs[i];
       if (Cartesian3.dot(scaled, eye) <= 1) continue;
-      const screen = SceneTransforms.worldToWindowCoordinates(
-        this.widget.scene,
-        position,
-        this.scratch,
-      );
-      if (!screen) continue;
+      const screen = this.screen;
+      if (!this.projectPoint(position, screen)) continue;
       const newest = count === 1 ? 1 : i / (count - 1);
       ctx.globalAlpha = CRUMB_MIN_ALPHA + (1 - CRUMB_MIN_ALPHA) * newest;
       ctx.beginPath();
@@ -638,12 +686,125 @@ export class MarkerOverlay {
     ctx.globalAlpha = 1;
   }
 
+  private crowded(layer: Layer): boolean {
+    let dots = 0;
+    for (let i = 0; i < layer.placed.length; i++) {
+      if (
+        layer.visible[i] === 1 &&
+        drawnAs(layer, layer.placed[i].marker).glyph === "dot" &&
+        ++dots >= STAMP_FROM
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private ringMask(size: number): StampMask | null {
+    const key = `${size}@${this.ratio}`;
+    const known = this.masks.get(key);
+    if (known !== undefined) return known;
+    let mask: StampMask | null = null;
+    if (size <= STAMP_MAX_SIZE) {
+      const stroke = LINE_WIDTH * this.ratio;
+      const diameter = size * this.ratio;
+      let side = Math.ceil(diameter + stroke) + MASK_MARGIN;
+      side += side % 2;
+      const canvas = document.createElement("canvas");
+      canvas.width = side;
+      canvas.height = side;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (context) {
+        context.lineWidth = stroke;
+        context.strokeStyle = "white";
+        context.beginPath();
+        context.arc(side / 2, side / 2, diameter / 2, 0, Math.PI * 2);
+        context.stroke();
+        const data = context.getImageData(0, 0, side, side).data;
+        const alpha = new Uint8Array(side * side);
+        for (let i = 0; i < alpha.length; i++) alpha[i] = data[i * 4 + 3];
+        mask = { side, alpha };
+      }
+    }
+    this.masks.set(key, mask);
+    return mask;
+  }
+
+  private colourOf(css: string): number {
+    const known = this.colours.get(css);
+    if (known !== undefined) return known;
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    let colour = packColour(255, 255, 255);
+    if (context) {
+      context.fillStyle = css;
+      context.fillRect(0, 0, 1, 1);
+      const [red, green, blue] = context.getImageData(0, 0, 1, 1).data;
+      colour = packColour(red, green, blue);
+    }
+    this.colours.set(css, colour);
+    return colour;
+  }
+
+  private flushStamps(ctx: CanvasRenderingContext2D) {
+    const bounds = this.stamper.bounds;
+    if (!bounds) return;
+    const { width, height } = this.stamper.size;
+    let canvas = this.stampCanvas;
+    if (!canvas) {
+      canvas = document.createElement("canvas");
+      this.stampCanvas = canvas;
+    }
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+    const target = canvas.getContext("2d");
+    if (!target) return;
+    let image = this.stampImage;
+    if (
+      !image ||
+      image.width !== width ||
+      image.height !== height ||
+      image.data.buffer !== this.stamper.buffer
+    ) {
+      image = new ImageData(
+        new Uint8ClampedArray(this.stamper.buffer),
+        width,
+        height,
+      );
+      this.stampImage = image;
+    }
+    const spanX = bounds.right - bounds.left;
+    const spanY = bounds.bottom - bounds.top;
+    target.putImageData(image, 0, 0, bounds.left, bounds.top, spanX, spanY);
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(
+      canvas,
+      bounds.left,
+      bounds.top,
+      spanX,
+      spanY,
+      bounds.left,
+      bounds.top,
+      spanX,
+      spanY,
+    );
+    ctx.restore();
+  }
+
   private drawLayer(
     ctx: CanvasRenderingContext2D,
     layer: Layer,
     tone: Marker["tone"],
+    stamp: boolean,
   ) {
-    ctx.strokeStyle = this.toneColour(tone);
+    const css = this.toneColour(tone);
+    const stampColour = stamp ? this.colourOf(css) : 0;
+    ctx.strokeStyle = css;
     ctx.lineWidth = LINE_WIDTH;
     ctx.lineJoin = "round";
     const split = layer.fadedCount > 0 && !layer.stale;
@@ -655,6 +816,19 @@ export class MarkerOverlay {
         if (!layer.visible[i] || marker.tone !== tone) continue;
         if (split && layer.faded[i] !== pass) continue;
         const { glyph, size } = drawnAs(layer, marker);
+        if (stamp && glyph === "dot") {
+          const mask = this.ringMask(size);
+          if (mask) {
+            this.stamper.stamp(
+              layer.x[i] * this.ratio,
+              layer.y[i] * this.ratio,
+              mask,
+              stampColour,
+              layer.stale || pass === 1 ? STALE_ALPHA : 1,
+            );
+            continue;
+          }
+        }
         const turned = layer.rotation[i];
         glyphPath(
           ctx,

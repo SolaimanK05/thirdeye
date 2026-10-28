@@ -19,6 +19,7 @@ from thirdeye.db import Pool, get_pool
 from thirdeye.deps import get_layer_cache, get_reader, get_writer
 from thirdeye.layers import LayerCache, ViewLoader
 from thirdeye.reads import (
+    ElementRecord,
     EntityRecord,
     EventRecord,
     FixRecord,
@@ -58,6 +59,8 @@ class FakeReader:
     entities: dict[UUID, EntityRecord] = field(default_factory=dict)
     fix_rows: dict[UUID, list[FixRecord]] = field(default_factory=dict)
     fix_calls: list[tuple[UUID, int]] = field(default_factory=list)
+    element_rows: list[ElementRecord] = field(default_factory=list)
+    element_calls: int = 0
     healthy: bool = True
     snapshot_calls: int = 0
     view_rows: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
@@ -137,6 +140,11 @@ class FakeReader:
         self.check()
         self.fix_calls.append((entity_id, limit))
         return self.fix_rows.get(entity_id, [])[-limit:]
+
+    async def satellite_elements(self, module_id: str) -> list[ElementRecord]:
+        self.check()
+        self.element_calls += 1
+        return self.element_rows
 
 
 @dataclass
@@ -233,6 +241,9 @@ class Recorder:
         self.observation_prunes: list[tuple[str, int]] = []
         self.cooldowns: list[tuple[str, datetime, str]] = []
         self.metas: list[tuple[str, dict[str, Any]]] = []
+        self.last_attempt: store.LastAttempt | None = None
+        self.last_attempt_error: Exception | None = None
+        self.last_attempt_looks: list[str] = []
 
     async def prune_events(
         self, conn: object, module_id: str, keep_seconds: int, now: datetime
@@ -300,6 +311,14 @@ class Recorder:
     ) -> None:
         self.metas.append((module_id, dict(meta)))
 
+    async def read_last_attempt(
+        self, pool: object, module_id: str
+    ) -> store.LastAttempt | None:
+        self.last_attempt_looks.append(module_id)
+        if self.last_attempt_error is not None:
+            raise self.last_attempt_error
+        return self.last_attempt
+
 
 @pytest.fixture
 def recorder(monkeypatch: pytest.MonkeyPatch) -> Recorder:
@@ -311,4 +330,5 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> Recorder:
     monkeypatch.setattr(store, "prune_observations", rec.prune_observations)
     monkeypatch.setattr(store, "record_cooldown", rec.record_cooldown)
     monkeypatch.setattr(store, "record_meta", rec.record_meta)
+    monkeypatch.setattr(store, "read_last_attempt", rec.read_last_attempt)
     return rec
