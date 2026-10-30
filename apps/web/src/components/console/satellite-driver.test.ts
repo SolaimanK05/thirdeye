@@ -4,10 +4,23 @@ import { GEO_OMM, ISS_EPOCH_MS, ISS_OMM } from "@/modules/satellites/fixtures";
 import { InProcessPort } from "@/modules/satellites/test-port";
 import { renderedPosition } from "@/state/motion";
 import { useOrbit } from "@/state/orbit";
-import type { LayerSizing, Marker } from "./markers";
 import {
-  FOLLOW_TICK_MS,
+  type LayerSizing,
+  type Marker,
   type OverlayPort,
+  SEGMENT_LAT0,
+  SEGMENT_LAT1,
+  SEGMENT_LON0,
+  SEGMENT_LON1,
+  SEGMENT_STRIDE,
+  SEGMENT_T0,
+  SEGMENT_T1,
+  type SegmentUpdate,
+} from "./markers";
+import {
+  DISPLAY_DELAY_MS,
+  FOLLOW_TICK_MS,
+  MAX_SEGMENT_MS,
   SATELLITES_ID,
   SatelliteDriver,
   TICK_MS,
@@ -312,5 +325,201 @@ describe("the satellite driver", () => {
     const count = view.calls.length;
     vi.advanceTimersByTime(5 * TICK_MS);
     expect(view.calls).toHaveLength(count);
+  });
+});
+
+function segmentOverlay(enabled = true) {
+  const base = overlay();
+  const segments: {
+    data: Float64Array;
+    rows: Uint32Array | null;
+    count: number;
+  }[] = [];
+  const port: OverlayPort = {
+    ...base.port,
+    setSegments: (_id, update: SegmentUpdate) => {
+      segments.push({
+        data: update.data.slice(0, update.count * SEGMENT_STRIDE),
+        rows: update.rows,
+        count: update.count,
+      });
+    },
+    segmentMotion: () => enabled,
+  };
+  return { ...base, port, segments };
+}
+
+function segmentRig(enabled = true) {
+  const port = new InProcessPort();
+  const view = segmentOverlay(enabled);
+  let nowMs = ISS_EPOCH_MS;
+  const driver = new SatelliteDriver({
+    overlay: view.port,
+    port,
+    now: () => nowMs,
+  });
+  created.push(driver);
+  return {
+    driver,
+    view,
+    advance: (ms: number) => {
+      nowMs += ms;
+    },
+    now: () => nowMs,
+  };
+}
+
+function cell(
+  update: { data: Float64Array },
+  satellite: number,
+  column: number,
+): number {
+  return update.data[satellite * SEGMENT_STRIDE + column];
+}
+
+describe("the satellite driver in segment mode", () => {
+  test("writes segments instead of positions", () => {
+    const { driver, view } = segmentRig();
+    driver.setElements(ELEMENTS);
+    expect(view.segments).toHaveLength(1);
+    expect(view.positions()).toHaveLength(0);
+    expect(view.segments[0].rows).toBeNull();
+    expect(view.segments[0].count).toBe(3);
+  });
+
+  test("the first frame is a standing segment shown one display delay late", () => {
+    const { driver, view, now } = segmentRig();
+    driver.setElements(ELEMENTS);
+    const [first] = view.segments;
+    const at = (now() + DISPLAY_DELAY_MS) / 1000;
+    expect(cell(first, 0, SEGMENT_T0)).toBe(at);
+    expect(cell(first, 0, SEGMENT_T1)).toBe(at);
+    expect(cell(first, 0, SEGMENT_LON0)).toBe(cell(first, 0, SEGMENT_LON1));
+    expect(cell(first, 0, SEGMENT_LAT0)).toBe(cell(first, 0, SEGMENT_LAT1));
+  });
+
+  test("the next frame runs from the last positions to the new ones over one tick", () => {
+    const { driver, view, advance, now } = segmentRig();
+    driver.setElements(ELEMENTS);
+    driver.setActive(true);
+    const [first] = view.segments;
+    const start = now();
+    advance(TICK_MS);
+    vi.advanceTimersByTime(TICK_MS);
+    const latest = view.segments.at(-1);
+    expect(latest).not.toBe(first);
+    if (!latest) return;
+    expect(cell(latest, 0, SEGMENT_T0)).toBe((start + DISPLAY_DELAY_MS) / 1000);
+    expect(cell(latest, 0, SEGMENT_T1)).toBe(
+      (start + TICK_MS + DISPLAY_DELAY_MS) / 1000,
+    );
+    expect(cell(latest, 0, SEGMENT_LON0)).toBeCloseTo(
+      cell(first, 0, SEGMENT_LON1),
+      9,
+    );
+    expect(cell(latest, 0, SEGMENT_LON1)).not.toBeCloseTo(
+      cell(latest, 0, SEGMENT_LON0),
+      3,
+    );
+    expect(cell(latest, 0, SEGMENT_LAT0)).toBeCloseTo(
+      cell(first, 0, SEGMENT_LAT1),
+      9,
+    );
+  });
+
+  test("following shortens the span to the quicker tick", () => {
+    const { driver, view, advance } = segmentRig();
+    driver.setElements(ELEMENTS);
+    driver.setActive(true);
+    driver.setFollowing(true);
+    advance(FOLLOW_TICK_MS);
+    vi.advanceTimersByTime(FOLLOW_TICK_MS);
+    const latest = view.segments.at(-1);
+    if (!latest) throw new Error("no segment written");
+    const span = cell(latest, 0, SEGMENT_T1) - cell(latest, 0, SEGMENT_T0);
+    expect(span * 1000).toBeLessThanOrEqual(FOLLOW_TICK_MS + 1);
+    expect(span).toBeGreaterThan(0);
+  });
+
+  test("a long gap between frames makes a standing segment instead of a long chord", () => {
+    const { driver, view, advance } = segmentRig();
+    driver.setElements(ELEMENTS);
+    driver.setActive(true);
+    advance(MAX_SEGMENT_MS + 1000);
+    vi.advanceTimersByTime(TICK_MS);
+    const latest = view.segments.at(-1);
+    if (!latest) throw new Error("no segment written");
+    expect(cell(latest, 0, SEGMENT_T0)).toBe(cell(latest, 0, SEGMENT_T1));
+    expect(cell(latest, 0, SEGMENT_LON0)).toBe(cell(latest, 0, SEGMENT_LON1));
+  });
+
+  test("a new set of satellites starts from standing segments", () => {
+    const { driver, view, advance } = segmentRig();
+    driver.setElements(ELEMENTS);
+    driver.setActive(true);
+    advance(TICK_MS);
+    vi.advanceTimersByTime(TICK_MS);
+    driver.setElements(ELEMENTS.slice(0, 2));
+    const latest = view.segments.at(-1);
+    if (!latest) throw new Error("no segment written");
+    expect(latest.count).toBe(2);
+    expect(cell(latest, 0, SEGMENT_T0)).toBe(cell(latest, 0, SEGMENT_T1));
+  });
+
+  test("the position handed to the camera moves along the segment with the clock", () => {
+    const { driver, advance } = segmentRig();
+    driver.setElements(ELEMENTS);
+    driver.setActive(true);
+    advance(TICK_MS);
+    vi.advanceTimersByTime(TICK_MS);
+    const early = driver.positionOf("iss");
+    advance(TICK_MS / 2);
+    const middle = driver.positionOf("iss");
+    advance(TICK_MS);
+    const late = driver.positionOf("iss");
+    expect(early && middle && late).toBeTruthy();
+    if (!early || !middle || !late) return;
+    const toMiddle = Math.hypot(middle.lon - early.lon, middle.lat - early.lat);
+    const toLate = Math.hypot(late.lon - early.lon, late.lat - early.lat);
+    expect(toMiddle).toBeGreaterThan(0);
+    expect(toLate).toBeGreaterThan(toMiddle);
+    expect(renderedPosition(SATELLITES_ID, "iss")?.lon).toBeCloseTo(
+      late.lon,
+      9,
+    );
+  });
+
+  test("works on only the starred satellites with the segments to match", () => {
+    const { driver, view } = segmentRig();
+    driver.setElements(ELEMENTS);
+    driver.setStars(new Set(["geo"]), true);
+    const latest = view.segments.at(-1);
+    if (!latest) throw new Error("no segment written");
+    expect(latest.count).toBe(1);
+    expect(
+      view
+        .layers()
+        .at(-1)
+        ?.markers.map((m) => m.id),
+    ).toEqual(["geo"]);
+  });
+
+  test("keeps moving the lone selected satellite while out of scope", () => {
+    const { driver, view, advance } = segmentRig();
+    driver.setElements(ELEMENTS);
+    driver.setInScope(false);
+    driver.setSelected("iss");
+    const before = view.segments.length;
+    advance(TICK_MS);
+    vi.advanceTimersByTime(TICK_MS);
+    expect(view.segments.length).toBeGreaterThan(before);
+    expect(useOrbit.getState().sample?.id).toBe("iss");
+  });
+
+  test("falls back to positions when the overlay stops doing segments", () => {
+    const { driver, view } = segmentRig(false);
+    driver.setElements(ELEMENTS);
+    expect(view.segments).toHaveLength(0);
+    expect(view.positions().length).toBeGreaterThan(0);
   });
 });

@@ -30,6 +30,34 @@ export type Marker = {
   adaptive?: boolean;
 };
 
+export type LayerOptions = { pickable?: boolean; reported?: boolean };
+
+export type OverlayStats = {
+  layers: number;
+  markers: number;
+};
+
+export type SegmentUpdate = {
+  data: Float64Array;
+  rows: Uint32Array | null;
+  count: number;
+};
+
+export type OverlayPort = {
+  setLayer: (
+    moduleId: string,
+    markers: readonly Marker[],
+    stale: boolean,
+    sizing?: LayerSizing,
+    options?: LayerOptions,
+  ) => void;
+  removeLayer: (moduleId: string) => void;
+  setPositions: (moduleId: string, data: Float64Array) => void;
+  setSegments?: (moduleId: string, update: SegmentUpdate) => void;
+  segmentMotion?: () => boolean;
+  invalidate: () => void;
+};
+
 export const HIT_RADIUS_PX = 22;
 
 export function withStars(
@@ -49,3 +77,14 @@ export function withStars(
 }
 
 export const POSITION_STRIDE = 4;
+
+export const SEGMENT_STRIDE = 9;
+export const SEGMENT_LON0 = 0;
+export const SEGMENT_LAT0 = 1;
+export const SEGMENT_LON1 = 2;
+export const SEGMENT_LAT1 = 3;
+export const SEGMENT_T0 = 4;
+export const SEGMENT_T1 = 5;
+export const SEGMENT_H0 = 6;
+export const SEGMENT_H1 = 7;
+export const SEGMENT_FADED = 8;

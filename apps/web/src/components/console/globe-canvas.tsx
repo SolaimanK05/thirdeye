@@ -18,13 +18,25 @@ import {
   TileMapServiceImageryProvider,
 } from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
-import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useModules } from "@/api/queries";
 import { ENTITY_VIEWS } from "@/modules/registry";
 import { moversFromKey, moversKey } from "@/motion/movers";
+import { perfMetrics } from "@/perf/metrics";
+import { DEFAULT_FLAGS, readFlags } from "@/perf/params";
+import { installProbe } from "@/perf/probe";
 import { useInView } from "@/state/in-view";
+import { renderedPosition } from "@/state/motion";
 import { useSelection } from "@/state/selection";
 import { useViewport } from "@/state/viewport";
+import { BenchDriver } from "./bench-driver";
 import { useConsole } from "./console-shell";
 import { GLOBE_CREDITS_ID } from "./globe-config";
 import { isVectorStyle, mapDetailFor } from "./globe-style";
@@ -32,6 +44,7 @@ import { createVectorGlobe, type VectorGlobe } from "./globe-vectors";
 import { LayerMarkers } from "./layer-markers";
 import { MarkerOverlay } from "./marker-overlay";
 import { MotionDriver } from "./motion-driver";
+import { PerfHud } from "./perf-hud";
 import type { GlobeStyle } from "./types";
 import {
   cameraHeightKm,
@@ -113,9 +126,24 @@ function trackDisc(widget: CesiumWidget, element: HTMLElement) {
   });
 }
 
+const BUTTON_DOWN_INPUTS = [
+  ScreenSpaceEventType.LEFT_DOWN,
+  ScreenSpaceEventType.MIDDLE_DOWN,
+  ScreenSpaceEventType.RIGHT_DOWN,
+] as const;
+
+const BUTTON_UP_INPUTS = [
+  ScreenSpaceEventType.LEFT_UP,
+  ScreenSpaceEventType.MIDDLE_UP,
+  ScreenSpaceEventType.RIGHT_UP,
+] as const;
+
 function watchPointer(widget: CesiumWidget, overlay: MarkerOverlay) {
   const canvas = widget.scene.canvas;
   const handler = new ScreenSpaceEventHandler(canvas);
+  let buttonsDown = 0;
+  let frame = 0;
+  let pending: { x: number; y: number } | null = null;
   handler.setInputAction(
     ({ position }: ScreenSpaceEventHandler.PositionedEvent) => {
       const hit = overlay.hitTest(position.x, position.y);
@@ -134,23 +162,47 @@ function watchPointer(widget: CesiumWidget, overlay: MarkerOverlay) {
     },
     ScreenSpaceEventType.LEFT_CLICK,
   );
+  for (const input of BUTTON_DOWN_INPUTS) {
+    handler.setInputAction(() => {
+      buttonsDown += 1;
+      canvas.style.cursor = "";
+    }, input);
+  }
+  for (const input of BUTTON_UP_INPUTS) {
+    handler.setInputAction(() => {
+      buttonsDown = Math.max(0, buttonsDown - 1);
+    }, input);
+  }
+  const hover = () => {
+    frame = 0;
+    const at = pending;
+    pending = null;
+    if (!at || buttonsDown > 0) return;
+    canvas.style.cursor = overlay.hitTest(at.x, at.y) ? "pointer" : "";
+  };
   handler.setInputAction(
     ({ endPosition }: ScreenSpaceEventHandler.MotionEvent) => {
-      const hit = overlay.hitTest(endPosition.x, endPosition.y);
-      canvas.style.cursor = hit ? "pointer" : "";
+      if (buttonsDown > 0) return;
+      pending = { x: endPosition.x, y: endPosition.y };
+      if (frame === 0) frame = requestAnimationFrame(hover);
     },
     ScreenSpaceEventType.MOUSE_MOVE,
   );
-  return () => handler.destroy();
+  return () => {
+    if (frame !== 0) cancelAnimationFrame(frame);
+    handler.destroy();
+  };
 }
 
 export default function GlobeCanvas() {
   const frame = useRef<HTMLDivElement>(null);
   const container = useRef<HTMLDivElement>(null);
-  const markerCanvas = useRef<HTMLCanvasElement>(null);
+  const markerGl = useRef<HTMLCanvasElement>(null);
+  const markerLabels = useRef<HTMLCanvasElement>(null);
   const globe = useRef<Globe | null>(null);
   const [overlay, setOverlay] = useState<MarkerOverlay | null>(null);
   const [motion, setMotion] = useState<MotionDriver | null>(null);
+  const [flags, setFlags] = useState(DEFAULT_FLAGS);
   const { data: modules } = useModules();
   const selected = useSelection((state) => state.selected);
   const following = useSelection((state) => state.following);
@@ -174,9 +226,18 @@ export default function GlobeCanvas() {
   useEffect(() => {
     const element = container.current;
     const frameElement = frame.current;
-    const markerElement = markerCanvas.current;
+    const glElement = markerGl.current;
+    const labelsElement = markerLabels.current;
     const creditElement = document.getElementById(GLOBE_CREDITS_ID);
-    if (!element || !frameElement || !markerElement || !creditElement) return;
+    if (
+      !element ||
+      !frameElement ||
+      !glElement ||
+      !labelsElement ||
+      !creditElement
+    ) {
+      return;
+    }
 
     const start = startView();
     const imagery = ImageryLayer.fromProviderAsync(
@@ -243,7 +304,7 @@ export default function GlobeCanvas() {
 
     const markers = new MarkerOverlay(
       widget,
-      markerElement,
+      { gl: glElement, labels: labelsElement },
       {
         default: cssValue("--color-ink-2"),
         notable: cssValue("--color-amber"),
@@ -251,7 +312,10 @@ export default function GlobeCanvas() {
         plate: cssValue("--color-panel"),
         font: getComputedStyle(document.body).fontFamily,
       },
-      (counts) => useInView.getState().setCounts(counts),
+      {
+        renderer: readFlags(window.location.search).renderer,
+        report: (counts) => useInView.getState().setCounts(counts),
+      },
     );
     const stopPointer = watchPointer(widget, markers);
     const driver = new MotionDriver(widget, markers, () =>
@@ -282,6 +346,42 @@ export default function GlobeCanvas() {
       if (!widget.isDestroyed()) widget.destroy();
     };
   }, []);
+
+  useEffect(() => {
+    setFlags(readFlags(window.location.search));
+  }, []);
+
+  const benchCount = flags.bench;
+  const perfOn = flags.perf;
+
+  useEffect(() => {
+    if (!overlay || benchCount <= 0) return;
+    const driver = new BenchDriver(overlay, benchCount);
+    driver.start();
+    return () => driver.destroy();
+  }, [overlay, benchCount]);
+
+  useEffect(() => {
+    if (!overlay || !perfOn) return;
+    return installProbe(window, {
+      snapshot: () => perfMetrics.snapshot(),
+      project: (lon, lat) => overlay.project(lon, lat),
+      position: (moduleId, id) => renderedPosition(moduleId, id),
+      get renderer() {
+        return overlay.rendererKind;
+      },
+    });
+  }, [overlay, perfOn]);
+
+  const overlayKind = useCallback(
+    () => overlay?.rendererKind ?? "canvas",
+    [overlay],
+  );
+
+  const overlayStats = useCallback(
+    () => overlay?.stats() ?? { layers: 0, markers: 0 },
+    [overlay],
+  );
 
   useEffect(() => {
     if (globe.current) applyStyle(globe.current, globeStyle, zoomPercent);
@@ -368,10 +468,15 @@ export default function GlobeCanvas() {
         <div className="globe-glow" />
       </div>
       <canvas
-        ref={markerCanvas}
+        ref={markerGl}
+        className="pointer-events-none absolute inset-0 size-full"
+      />
+      <canvas
+        ref={markerLabels}
         className="pointer-events-none absolute inset-0 size-full"
       />
       {overlay && <LayerMarkers overlay={overlay} />}
+      {perfOn && <PerfHud stats={overlayStats} renderer={overlayKind} />}
     </div>
   );
 }

@@ -21,7 +21,7 @@ import { kmPerPixel } from "./zoom";
 
 export type FollowTarget = { moduleId: string; id: string };
 
-const PUBLISH_EVERY_STEPS = 12;
+const PUBLISH_EVERY_MS = 1000;
 
 const CANCEL_INPUTS = [
   ScreenSpaceEventType.LEFT_DOWN,
@@ -41,10 +41,11 @@ export class MotionDriver {
   private readonly unobserve: () => void;
   private readonly unsubscribe: () => void;
   private readonly unorbit: () => void;
+  private readonly unframe: () => void;
   private following: FollowTarget | null = null;
   private readonly crumbs = new Breadcrumbs();
   private metresPerPixel = kmPerPixel(100) * 1000;
-  private stepsSincePublish = 0;
+  private lastPublishAt = Number.NEGATIVE_INFINITY;
 
   constructor(
     widget: CesiumWidget,
@@ -69,8 +70,11 @@ export class MotionDriver {
     });
     this.unsubscribe = overlay.onChange((moduleId, change) => {
       if (!this.engine.movers.has(moduleId)) return;
-      if (change === "layer") this.engine.apply(moduleId);
-      else if (overlay.isVisible(moduleId)) this.engine.apply(moduleId);
+      if (change === "layer" || change === "renderer") {
+        this.engine.apply(moduleId);
+      } else if (overlay.isVisible(moduleId)) {
+        this.engine.apply(moduleId);
+      }
       this.loop.wake();
     });
 
@@ -79,13 +83,16 @@ export class MotionDriver {
       if (
         state.sample === previous.sample ||
         target === null ||
-        this.engine.movers.has(target.moduleId)
+        this.engine.movers.has(target.moduleId) ||
+        this.overlay.segmentMotion()
       ) {
         return;
       }
       this.centre();
       this.countStep();
     });
+
+    this.unframe = overlay.onFrame(() => this.frame());
 
     this.handler = new ScreenSpaceEventHandler(widget.scene.canvas);
     for (const input of CANCEL_INPUTS) {
@@ -128,7 +135,8 @@ export class MotionDriver {
       this.following.id === target.id;
     this.following = target;
     this.engine.setFullRate(target?.moduleId ?? null);
-    this.stepsSincePublish = 0;
+    this.overlay.setFullRate(target !== null);
+    this.lastPublishAt = performance.now();
     if (!same && this.crumbs.clear()) this.overlay.setBreadcrumbs([]);
     if (target) {
       this.centre();
@@ -143,6 +151,8 @@ export class MotionDriver {
     this.unobserve();
     this.unsubscribe();
     this.unorbit();
+    this.unframe();
+    this.overlay.setFullRate(false);
     this.handler.destroy();
     setMotionProbe(null);
     for (const moduleId of this.engine.movers.keys()) {
@@ -152,17 +162,23 @@ export class MotionDriver {
 
   private tick(): boolean {
     const moved = this.engine.step();
-    if (this.following && moved) {
+    if (this.following && moved && !this.overlay.segmentMotion()) {
       this.centre();
       this.countStep();
     }
     return moved || this.engine.pending;
   }
 
+  private frame() {
+    if (!this.following || !this.overlay.segmentMotion()) return;
+    this.centre();
+    this.countStep();
+  }
+
   private countStep() {
-    this.stepsSincePublish += 1;
-    if (this.stepsSincePublish >= PUBLISH_EVERY_STEPS) {
-      this.stepsSincePublish = 0;
+    const now = performance.now();
+    if (now - this.lastPublishAt >= PUBLISH_EVERY_MS) {
+      this.lastPublishAt = now;
       this.onMoved();
     }
   }

@@ -10,23 +10,26 @@ import {
 import { addPositionProbe } from "@/state/motion";
 import { useOrbit } from "@/state/orbit";
 import { serverNowMs } from "@/state/stream";
-import type { LayerSizing, Marker } from "./markers";
+import { segmentLonLat } from "./gpu/segment-math";
+import {
+  type OverlayPort,
+  SEGMENT_FADED,
+  SEGMENT_H0,
+  SEGMENT_H1,
+  SEGMENT_LAT0,
+  SEGMENT_LAT1,
+  SEGMENT_LON0,
+  SEGMENT_LON1,
+  SEGMENT_STRIDE,
+  SEGMENT_T0,
+  SEGMENT_T1,
+} from "./markers";
 
 export const SATELLITES_ID = "satellites";
 export const TICK_MS = 1000;
 export const FOLLOW_TICK_MS = 250;
-
-export type OverlayPort = {
-  setLayer: (
-    moduleId: string,
-    markers: readonly Marker[],
-    stale: boolean,
-    sizing?: LayerSizing,
-  ) => void;
-  removeLayer: (moduleId: string) => void;
-  setPositions: (moduleId: string, data: Float64Array) => void;
-  invalidate: () => void;
-};
+export const DISPLAY_DELAY_MS = 1000;
+export const MAX_SEGMENT_MS = 3000;
 
 export type DriverOptions = {
   overlay: OverlayPort;
@@ -45,6 +48,11 @@ export class SatelliteDriver {
   private ids: readonly string[] = [];
   private index = new Map<string, number>();
   private latest: Float64Array = new Float64Array(0);
+  private previous: Float64Array = new Float64Array(0);
+  private latestAtMs = Number.NaN;
+  private previousAtMs = Number.NaN;
+  private segmentData: Float64Array = new Float64Array(0);
+  private span: { from: number; to: number } | null = null;
   private scratch: Float64Array = new Float64Array(0);
   private order: Int32Array | null = null;
   private starred: ReadonlySet<string> = new Set();
@@ -131,7 +139,27 @@ export class SatelliteDriver {
     const from = at * POSITION_STRIDE;
     const lon = this.latest[from];
     const lat = this.latest[from + 1];
-    return Number.isFinite(lon) && Number.isFinite(lat) ? { lat, lon } : null;
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
+    const span = this.span;
+    if (span !== null && this.segmented()) {
+      const startLon = this.previous[from];
+      const startLat = this.previous[from + 1];
+      if (Number.isFinite(startLon) && Number.isFinite(startLat)) {
+        const found = { lon, lat };
+        segmentLonLat(
+          startLon,
+          startLat,
+          lon,
+          lat,
+          span.from,
+          span.to,
+          this.now() / 1000,
+          found,
+        );
+        return { lat: found.lat, lon: found.lon };
+      }
+    }
+    return { lat, lon };
   }
 
   destroy(): void {
@@ -187,12 +215,23 @@ export class SatelliteDriver {
       return;
     }
     const used = message.count * POSITION_STRIDE;
-    if (this.latest.length < used) this.latest = new Float64Array(used);
+    if (this.latest.length < used) {
+      this.latest = new Float64Array(used);
+      this.previous = new Float64Array(used);
+      this.latestAtMs = Number.NaN;
+      this.previousAtMs = Number.NaN;
+    }
+    const swap = this.previous;
+    this.previous = this.latest;
+    this.latest = swap;
+    this.previousAtMs = this.latestAtMs;
     this.latest.set(message.positions.subarray(0, used));
+    this.latestAtMs = message.atMs;
     this.client.release(message.positions);
     if (message.ids !== null) {
       this.ids = message.ids;
       this.index = new Map(message.ids.map((id, i) => [id, i]));
+      this.previousAtMs = Number.NaN;
       this.rebuild();
     } else if (this.active || this.spotlight()) {
       this.place();
@@ -235,12 +274,55 @@ export class SatelliteDriver {
     return this.onlyStarred ? this.starred : null;
   }
 
+  private segmented(): boolean {
+    return (
+      this.overlay.setSegments !== undefined &&
+      this.overlay.segmentMotion?.() === true
+    );
+  }
+
   private place(): void {
+    if (this.segmented()) {
+      this.placeSegments();
+      return;
+    }
+    this.span = null;
     if (this.order === null) {
       this.overlay.setPositions(SATELLITES_ID, this.latest);
       return;
     }
     this.scratch = compact(this.latest, this.order, this.scratch);
     this.overlay.setPositions(SATELLITES_ID, this.scratch);
+  }
+
+  private placeSegments(): void {
+    const order = this.order;
+    const count = order === null ? this.ids.length : order.length;
+    const size = count * SEGMENT_STRIDE;
+    if (this.segmentData.length < size) {
+      this.segmentData = new Float64Array(size);
+    }
+    const data = this.segmentData;
+    const gap = this.latestAtMs - this.previousAtMs;
+    const continuous = gap > 0 && gap <= MAX_SEGMENT_MS;
+    const end = this.latestAtMs + DISPLAY_DELAY_MS;
+    const start = continuous ? this.previousAtMs + DISPLAY_DELAY_MS : end;
+    this.span = { from: start / 1000, to: end / 1000 };
+    for (let i = 0; i < count; i++) {
+      const source = (order === null ? i : order[i]) * POSITION_STRIDE;
+      const at = i * SEGMENT_STRIDE;
+      const lon = this.latest[source];
+      const lat = this.latest[source + 1];
+      data[at + SEGMENT_LON1] = lon;
+      data[at + SEGMENT_LAT1] = lat;
+      data[at + SEGMENT_LON0] = continuous ? this.previous[source] : lon;
+      data[at + SEGMENT_LAT0] = continuous ? this.previous[source + 1] : lat;
+      data[at + SEGMENT_T0] = this.span.from;
+      data[at + SEGMENT_T1] = this.span.to;
+      data[at + SEGMENT_H0] = Number.NaN;
+      data[at + SEGMENT_H1] = Number.NaN;
+      data[at + SEGMENT_FADED] = this.latest[source + 3];
+    }
+    this.overlay.setSegments?.(SATELLITES_ID, { data, rows: null, count });
   }
 }

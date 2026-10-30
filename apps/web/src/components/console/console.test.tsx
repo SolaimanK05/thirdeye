@@ -468,6 +468,7 @@ describe("client boundary", () => {
       "module-list.tsx",
       "module-status-lines.tsx",
       "modules-drawer.tsx",
+      "perf-hud.tsx",
       "public-badge.tsx",
       "refine-controls.tsx",
       "refine-panel.tsx",
