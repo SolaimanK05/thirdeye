@@ -67,7 +67,9 @@ export function CollapsedStrip({ side, label }: { side: Side; label: string }) {
 export function toggleClassName(side: Side, isCollapsed: boolean): string {
   return cx(
     "absolute top-0.5 z-10 hidden bg-panel lg:flex",
-    isCollapsed || side === "right" ? "left-1" : "right-1",
+    isCollapsed || side === "right"
+      ? "left-1"
+      : "right-[calc(var(--rail-gutter)+0.25rem)]",
   );
 }
 
@@ -98,7 +100,7 @@ export function SidebarBody({
         id={id}
         data-rail={side}
         className={cx(
-          "min-h-0 flex-1 overflow-y-auto overscroll-contain",
+          "rail-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain",
           collapsed[side] && "lg:hidden",
           className,
         )}

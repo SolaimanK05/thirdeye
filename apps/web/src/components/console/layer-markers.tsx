@@ -1,20 +1,26 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ModuleInfo } from "@/api/client";
 import { useLayer, useModules } from "@/api/queries";
+import { isBinaryMover, moverSpecs } from "@/data/binary";
+import { MoverLayers } from "@/data/mover-layers";
+import { useDataRuntime } from "@/data/runtime";
 import { refineRows, serverFloor } from "@/modules/refine";
 import { ENTITY_VIEWS, MODULE_VIEWS } from "@/modules/registry";
 import { useRefineValues } from "@/modules/use-refine";
+import { readFlags } from "@/perf/params";
 import { entityStore, useEntityView } from "@/state/entities";
 import { useFilters } from "@/state/filters";
 import { useLayerCaps } from "@/state/layer-caps";
+import { useMotionStatus } from "@/state/motion";
 import { useRefineStats } from "@/state/refine-stats";
 import { useSelection } from "@/state/selection";
 import { useStarred } from "@/state/starred";
 import { streamIsLive, useStreamStatus } from "@/state/stream";
 import { useViewport } from "@/state/viewport";
 import { useConsole } from "./console-shell";
+import { DataModuleMarkers, SyntheticMarkers } from "./data-markers";
 import type { MarkerOverlay } from "./marker-overlay";
 import { withStars } from "./markers";
 import { effectiveFilter } from "./rail";
@@ -33,25 +39,83 @@ function hasView(module: ModuleInfo): boolean {
 export function LayerMarkers({ overlay }: Props) {
   const { data: modules } = useModules();
   const { ids: starred } = useStarred();
+  const mode = useDataRuntime((state) => state.mode);
+  const hub = useDataRuntime((state) => state.hub);
+  const [layers, setLayers] = useState<MoverLayers | null>(null);
+  const synthetic = hub !== null && readFlags(window.location.search).synthetic;
+  const specs = useMemo(
+    () => (hub ? moverSpecs(modules, synthetic) : []),
+    [hub, modules, synthetic],
+  );
+  const specKey = JSON.stringify(specs);
+
+  useEffect(() => {
+    if (!hub) return;
+    const created = new MoverLayers(hub, overlay, {
+      setStat: (moduleId, stat) =>
+        useRefineStats.getState().setStat(moduleId, stat),
+      setMode: (moduleId, motion) =>
+        useMotionStatus.getState().setMode(moduleId, motion),
+    });
+    setLayers(created);
+    return () => {
+      created.destroy();
+      setLayers(null);
+    };
+  }, [hub, overlay]);
+
+  // The key stands for the list, so a refetch that changes nothing sends nothing.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see above
+  useEffect(() => {
+    hub?.setMovers(specs);
+  }, [hub, specKey]);
+
   const drawable = (modules ?? []).filter(
     (module) => module.enabled && hasView(module),
   );
-  return drawable.map((module) =>
-    ENTITY_VIEWS[module.id]?.computed ? (
-      <SatelliteMarkers
-        key={module.id}
-        module={module}
-        overlay={overlay}
-        starred={starred}
-      />
-    ) : (
+  const items = drawable.map((module) => {
+    if (ENTITY_VIEWS[module.id]?.computed) {
+      return (
+        <SatelliteMarkers
+          key={module.id}
+          module={module}
+          overlay={overlay}
+          starred={starred}
+        />
+      );
+    }
+    if (isBinaryMover(module.id)) {
+      if (mode === "pending") return null;
+      if (hub && layers) {
+        return (
+          <DataModuleMarkers
+            key={module.id}
+            module={module}
+            overlay={overlay}
+            hub={hub}
+            layers={layers}
+            starred={starred}
+          />
+        );
+      }
+      if (hub) return null;
+    }
+    return (
       <ModuleMarkers
         key={module.id}
         module={module}
         overlay={overlay}
         starred={starred}
       />
-    ),
+    );
+  });
+  return (
+    <>
+      {items}
+      {synthetic && hub && layers && (
+        <SyntheticMarkers overlay={overlay} hub={hub} layers={layers} />
+      )}
+    </>
   );
 }
 

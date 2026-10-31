@@ -32,6 +32,8 @@ export type StreamOptions = {
   url: string;
   onStatus: (status: StreamStatus) => void;
   onLayer: (moduleId: string) => void;
+  /** Like onLayer, with the version the module reached; for binary clients. */
+  onNotice?: (moduleId: string, version: number) => void;
   onResync: () => void;
   onSnapshot?: (snapshot: StreamSnapshot) => void;
   onDelta?: (delta: StreamDelta) => void;
@@ -89,6 +91,11 @@ export function parseHello(data: string): StreamHello | null {
 export function parseLayerNotice(data: string): string | null {
   const body = parseJson(data);
   return typeof body?.module_id === "string" ? body.module_id : null;
+}
+
+export function parseLayerVersion(data: string): number | null {
+  const body = parseJson(data);
+  return finite(body?.version) ? body.version : null;
 }
 
 function finite(value: unknown): value is number {
@@ -164,6 +171,7 @@ export function startStream(options: StreamOptions): () => void {
     url,
     onStatus,
     onLayer,
+    onNotice,
     onResync,
     onSnapshot,
     onDelta,
@@ -207,7 +215,10 @@ export function startStream(options: StreamOptions): () => void {
     current.addEventListener("layer", (event) => {
       if (!active()) return;
       const moduleId = parseLayerNotice(event.data);
-      if (moduleId !== null) onLayer(moduleId);
+      if (moduleId === null) return;
+      onLayer(moduleId);
+      const version = parseLayerVersion(event.data);
+      if (version !== null) onNotice?.(moduleId, version);
     });
 
     current.addEventListener("snapshot", (event) => {

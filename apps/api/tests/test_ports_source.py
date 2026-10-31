@@ -43,9 +43,12 @@ async def test_a_full_download_is_returned_and_readable_by_the_normaliser() -> N
     assert len(normalize_entities(raw, NOW)) == source.MIN_PORTS
 
 
-async def test_an_error_status_is_raised() -> None:
-    with pytest.raises(httpx.HTTPStatusError):
+async def test_an_error_status_is_reported_in_plain_words() -> None:
+    with pytest.raises(
+        source.PortsDownloadError, match="NGA answered HTTP 503"
+    ) as error:
         await download(httpx.Response(503))
+    assert source.URL not in str(error.value)
 
 
 async def test_a_web_page_instead_of_data_is_refused() -> None:

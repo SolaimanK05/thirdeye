@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     governor_cooldown_min_s: float = Field(default=30.0, gt=0, allow_inf_nan=False)
     governor_cooldown_max_s: float = Field(default=1800.0, gt=0, allow_inf_nan=False)
     cors_origins: list[str] = ["http://localhost:3000"]
+    synthetic_movers: int = Field(default=0, ge=0, le=250_000)
+    synthetic_interval_seconds: float = Field(
+        default=1.0, ge=0.1, le=60, allow_inf_nan=False
+    )
+    synthetic_seed: int = 1
 
     def has_key(self, key_env: str) -> bool:
         value = getattr(self, key_env.lower(), None)
@@ -141,6 +146,15 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"db_pool_min_size ({self.db_pool_min_size}) must not exceed "
                 f"db_pool_max_size ({self.db_pool_max_size})"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def check_synthetic_not_public(self) -> Self:
+        if self.public_instance and self.synthetic_movers > 0:
+            raise ValueError(
+                "synthetic_movers must be 0 when public_instance is true: "
+                "the synthetic feed is a test tool, not data"
             )
         return self
 

@@ -114,6 +114,7 @@
   }
 
   :root {
+    --rail-gutter: 8px;
     --globe-land: #1fae4f;
     --globe-grid: #17201b;
     --globe-sphere-high: #0b120e;
@@ -121,6 +122,32 @@
     --globe-rim: rgb(0 255 65 / 0.16);
     --globe-halo: rgb(0 255 65 / 0.06);
     --globe-glow: rgb(0 255 65 / 0.55);
+  }
+}
+
+@utility rail-scroll {
+  scrollbar-gutter: stable;
+
+  &::-webkit-scrollbar {
+    width: var(--rail-gutter);
+    height: var(--rail-gutter);
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: var(--color-line-2);
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background: var(--color-ink-3);
+  }
+
+  @supports not selector(::-webkit-scrollbar) {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-2) transparent;
   }
 }
 

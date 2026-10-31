@@ -9,7 +9,9 @@ from typing import Literal
 import structlog
 from pydantic import AwareDatetime, BaseModel
 
+from thirdeye.frames import has_frames
 from thirdeye.layers import EntityRow, LayerCache
+from thirdeye.movers import FrameBody, ModuleFrames, MoverSource
 
 log = structlog.get_logger()
 
@@ -22,7 +24,7 @@ REFRESH_RETRY_SECONDS = 5.0
 REFRESH_RETRY_CAP_SECONDS = 60.0
 
 type EventKind = Literal["hello", "layer", "snapshot", "delta"]
-type ModuleKind = Literal["events", "entities"]
+type ModuleKind = Literal["events", "entities", "movers"]
 type FetchedAt = Callable[[str], Awaitable[datetime | None]]
 type Clock = Callable[[], datetime]
 type Sleep = Callable[[float], Awaitable[None]]
@@ -156,6 +158,8 @@ class ModuleState:
     fetched_at: datetime | None = None
     rows: dict[str, EntityRow] = field(default_factory=dict)
     snapshot: str | None = None
+    frames: ModuleFrames | None = None
+    source: MoverSource | None = None
 
 
 class Broadcaster:
@@ -166,6 +170,7 @@ class Broadcaster:
         modules: Mapping[str, ModuleKind],
         instance: str,
         *,
+        sources: Mapping[str, MoverSource] | None = None,
         clock: Clock = utc_now,
         sleep: Sleep = asyncio.sleep,
         ring_events: int = RING_EVENTS,
@@ -175,7 +180,19 @@ class Broadcaster:
     ) -> None:
         self._cache = cache
         self._fetched_at = fetched_at
-        self._modules = {id_: ModuleState(kind) for id_, kind in modules.items()}
+        self._modules = {
+            id_: ModuleState(
+                kind,
+                frames=ModuleFrames.for_module(id_)
+                if kind == "entities" and has_frames(id_)
+                else None,
+            )
+            for id_, kind in modules.items()
+        }
+        for id_, source in (sources or {}).items():
+            self._modules[id_] = ModuleState(
+                "movers", frames=ModuleFrames.for_module(id_), source=source
+            )
         self._instance = instance
         self._clock = clock
         self._sleep = sleep
@@ -212,6 +229,12 @@ class Broadcaster:
     def entity_modules(self) -> frozenset[str]:
         return frozenset(
             id_ for id_, state in self._modules.items() if state.kind == "entities"
+        )
+
+    @property
+    def mover_modules(self) -> frozenset[str]:
+        return frozenset(
+            id_ for id_, state in self._modules.items() if state.frames is not None
         )
 
     def notify(self, module_id: str | None) -> None:
@@ -259,7 +282,9 @@ class Broadcaster:
         if state is None:
             return
         async with state.lock:
-            if state.kind == "entities":
+            if state.kind == "movers":
+                await self._refresh_movers(module_id, state)
+            elif state.kind == "entities":
                 await self._refresh_entities(module_id, state)
             else:
                 await self._refresh_events(module_id, state)
@@ -287,6 +312,10 @@ class Broadcaster:
             state.fetched_at = fetched_at
             state.rows = rows
             state.snapshot = None
+            if state.frames is not None:
+                await asyncio.to_thread(
+                    state.frames.load, list(rows.values()), 1, epoch_ms(fetched_at)
+                )
             return
         upserts = [row for key, row in rows.items() if state.rows.get(key) != row]
         removes = [key for key in state.rows if key not in rows]
@@ -296,6 +325,14 @@ class Broadcaster:
         state.fetched_at = fetched_at
         state.rows = rows
         state.snapshot = None
+        if state.frames is not None:
+            await asyncio.to_thread(
+                state.frames.advance,
+                upserts,
+                removes,
+                state.version,
+                epoch_ms(fetched_at),
+            )
         self._publish_layer(module_id, state)
         self._publish(
             "delta",
@@ -308,6 +345,50 @@ class Broadcaster:
                 removes=removes,
             ).model_dump_json(),
         )
+
+    async def _refresh_movers(self, module_id: str, state: ModuleState) -> None:
+        if state.source is None or state.frames is None:
+            return
+        upserts, removes, fetched_at = await state.source.advance()
+        if not state.loaded:
+            state.loaded = True
+            state.version = 1
+            state.fetched_at = fetched_at
+            await asyncio.to_thread(state.frames.load, upserts, 1, epoch_ms(fetched_at))
+            return
+        state.version += 1
+        state.fetched_at = fetched_at
+        await asyncio.to_thread(
+            state.frames.advance, upserts, removes, state.version, epoch_ms(fetched_at)
+        )
+        self._publish_layer(module_id, state)
+
+    async def frame_snapshot(self, module_id: str, encoding: str) -> FrameBody | None:
+        state = self._modules.get(module_id)
+        if state is None or state.frames is None:
+            return None
+        await self.ready([module_id])
+        frames = state.frames
+        async with state.lock:
+            version, raw = await asyncio.to_thread(frames.snapshot_frame)
+            epoch = frames.slot_epoch
+        body = await asyncio.to_thread(
+            frames.variant, "snapshot", version, encoding, raw
+        )
+        return FrameBody(version, epoch, encoding, body, immutable=False)
+
+    async def frame_delta(
+        self, module_id: str, version: int, slot_epoch: int, encoding: str
+    ) -> FrameBody | None:
+        state = self._modules.get(module_id)
+        if state is None or state.frames is None:
+            return None
+        frames = state.frames
+        raw = frames.delta_frame(version, slot_epoch)
+        if raw is None:
+            return None
+        body = await asyncio.to_thread(frames.variant, "delta", version, encoding, raw)
+        return FrameBody(version, slot_epoch, encoding, body, immutable=True)
 
     def _publish_layer(self, module_id: str, state: ModuleState) -> None:
         self._publish(
@@ -418,6 +499,10 @@ class Broadcaster:
                 ),
                 enforce=False,
             )
+
+
+def epoch_ms(moment: datetime | None) -> float:
+    return 0.0 if moment is None else moment.timestamp() * 1000.0
 
 
 def refresh_delay(failures: int) -> float:

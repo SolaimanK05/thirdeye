@@ -4,6 +4,7 @@ import {
   ScreenSpaceEventHandler,
   ScreenSpaceEventType,
 } from "cesium";
+import type { DataHub } from "@/data/hub";
 import { Breadcrumbs } from "@/motion/breadcrumbs";
 import { MotionEngine } from "@/motion/engine";
 import { MotionLoop } from "@/motion/loop";
@@ -36,6 +37,7 @@ export class MotionDriver {
   private readonly widget: CesiumWidget;
   private readonly overlay: MarkerOverlay;
   private readonly store: EntityStore;
+  private readonly hub: DataHub | null;
   private readonly onMoved: () => void;
   private readonly handler: ScreenSpaceEventHandler;
   private readonly unobserve: () => void;
@@ -52,10 +54,12 @@ export class MotionDriver {
     overlay: MarkerOverlay,
     onMoved: () => void,
     store: EntityStore = entityStore,
+    hub: DataHub | null = null,
   ) {
     this.widget = widget;
     this.overlay = overlay;
     this.store = store;
+    this.hub = hub;
     this.onMoved = onMoved;
     this.engine = new MotionEngine({
       target: overlay,
@@ -65,18 +69,28 @@ export class MotionDriver {
     });
     this.loop = new MotionLoop({ step: () => this.tick() });
 
-    this.unobserve = store.observe((change) => {
-      if (this.engine.ingest(change)) this.loop.wake();
-    });
-    this.unsubscribe = overlay.onChange((moduleId, change) => {
-      if (!this.engine.movers.has(moduleId)) return;
-      if (change === "layer" || change === "renderer") {
-        this.engine.apply(moduleId);
-      } else if (overlay.isVisible(moduleId)) {
-        this.engine.apply(moduleId);
-      }
-      this.loop.wake();
-    });
+    if (hub) {
+      // The data worker does the motion maths; this driver only follows.
+      const feed = () => (overlay.segmentMotion() ? "segments" : "positions");
+      hub.setFeed(feed());
+      this.unobserve = () => {};
+      this.unsubscribe = overlay.onChange((_moduleId, change) => {
+        if (change === "renderer") hub.setFeed(feed());
+      });
+    } else {
+      this.unobserve = store.observe((change) => {
+        if (this.engine.ingest(change)) this.loop.wake();
+      });
+      this.unsubscribe = overlay.onChange((moduleId, change) => {
+        if (!this.engine.movers.has(moduleId)) return;
+        if (change === "layer" || change === "renderer") {
+          this.engine.apply(moduleId);
+        } else if (overlay.isVisible(moduleId)) {
+          this.engine.apply(moduleId);
+        }
+        this.loop.wake();
+      });
+    }
 
     this.unorbit = useOrbit.subscribe((state, previous) => {
       const target = this.following;
@@ -84,6 +98,7 @@ export class MotionDriver {
         state.sample === previous.sample ||
         target === null ||
         this.engine.movers.has(target.moduleId) ||
+        hub !== null ||
         this.overlay.segmentMotion()
       ) {
         return;
@@ -101,11 +116,18 @@ export class MotionDriver {
         input,
       );
     }
-    setMotionProbe((moduleId, id) => this.engine.positionOf(moduleId, id));
+    setMotionProbe((moduleId, id) =>
+      hub
+        ? this.engine.movers.has(moduleId)
+          ? overlay.positionOfEntity(moduleId, id)
+          : null
+        : this.engine.positionOf(moduleId, id),
+    );
   }
 
   setMovers(delays: ReadonlyMap<string, number>) {
     this.engine.setMovers(delays);
+    if (this.hub) return;
     for (const moduleId of delays.keys()) {
       const rows = this.store.view(moduleId)?.rows;
       if (rows) {
@@ -170,7 +192,8 @@ export class MotionDriver {
   }
 
   private frame() {
-    if (!this.following || !this.overlay.segmentMotion()) return;
+    if (!this.following) return;
+    if (!this.hub && !this.overlay.segmentMotion()) return;
     this.centre();
     this.countStep();
   }

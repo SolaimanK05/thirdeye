@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { EntityRow } from "@/api/client";
 import {
   segmentLength,
@@ -208,6 +208,10 @@ describe("applying a layer in segment mode", () => {
 });
 
 describe("what each step recomputes", () => {
+  beforeEach(() => {
+    vi.spyOn(performance, "now").mockReturnValue(0);
+  });
+
   function crowd() {
     const ids = Array.from({ length: 600 }, (_, i) => `m${i}`);
     const rig = setup(ids);

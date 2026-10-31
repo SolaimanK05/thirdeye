@@ -35,7 +35,11 @@ async def fetch(client: httpx.AsyncClient, settings: Settings) -> bytes:
     chunks: list[bytes] = []
     size = 0
     async with client.stream("GET", URL, timeout=REQUEST_TIMEOUT) as response:
-        response.raise_for_status()
+        if response.status_code != httpx.codes.OK:
+            raise PortsDownloadError(
+                f"NGA answered HTTP {response.status_code}; the stored ports are "
+                "kept and the download is tried again later"
+            )
         async for chunk in response.aiter_bytes():
             size += len(chunk)
             if size > MAX_BYTES:

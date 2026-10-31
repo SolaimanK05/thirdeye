@@ -27,11 +27,13 @@ import {
   useState,
 } from "react";
 import { useModules } from "@/api/queries";
+import { useDataRuntime } from "@/data/runtime";
 import { ENTITY_VIEWS } from "@/modules/registry";
 import { moversFromKey, moversKey } from "@/motion/movers";
 import { perfMetrics } from "@/perf/metrics";
 import { DEFAULT_FLAGS, readFlags } from "@/perf/params";
 import { installProbe } from "@/perf/probe";
+import { entityStore } from "@/state/entities";
 import { useInView } from "@/state/in-view";
 import { renderedPosition } from "@/state/motion";
 import { useSelection } from "@/state/selection";
@@ -212,6 +214,8 @@ export default function GlobeCanvas() {
     useConsole();
 
   const startView = useEffectEvent(() => ({ zoomPercent, centre, globeStyle }));
+  const runtimeMode = useDataRuntime((state) => state.mode);
+  const hub = useDataRuntime((state) => state.hub);
 
   const onCameraMoved = useEffectEvent((widget: CesiumWidget) => {
     const { latitude, longitude, height } = widget.camera.positionCartographic;
@@ -318,11 +322,7 @@ export default function GlobeCanvas() {
       },
     );
     const stopPointer = watchPointer(widget, markers);
-    const driver = new MotionDriver(widget, markers, () =>
-      onCameraMoved(widget),
-    );
     setOverlay(markers);
-    setMotion(driver);
 
     const removeFov = scene.preRender.addEventListener(fitFov);
     const removeDisc = trackDisc(widget, frameElement);
@@ -334,9 +334,7 @@ export default function GlobeCanvas() {
     return () => {
       useViewport.getState().setBox(null);
       setOverlay(null);
-      setMotion(null);
       stopPointer();
-      driver.destroy();
       markers.destroy();
       removeMoveEnd();
       removeDisc();
@@ -373,6 +371,8 @@ export default function GlobeCanvas() {
     });
   }, [overlay, perfOn]);
 
+  const hubStats = useCallback(() => hub?.stats ?? null, [hub]);
+
   const overlayKind = useCallback(
     () => overlay?.rendererKind ?? "canvas",
     [overlay],
@@ -403,6 +403,23 @@ export default function GlobeCanvas() {
       duration: FLY_SECONDS,
     });
   }, [zoomPercent]);
+
+  useEffect(() => {
+    const widget = globe.current?.widget;
+    if (!overlay || !widget || runtimeMode === "pending") return;
+    const driver = new MotionDriver(
+      widget,
+      overlay,
+      () => onCameraMoved(widget),
+      entityStore,
+      hub,
+    );
+    setMotion(driver);
+    return () => {
+      setMotion(null);
+      driver.destroy();
+    };
+  }, [overlay, runtimeMode, hub]);
 
   useEffect(() => {
     overlay?.setSelected(selectedId);
@@ -476,7 +493,9 @@ export default function GlobeCanvas() {
         className="pointer-events-none absolute inset-0 size-full"
       />
       {overlay && <LayerMarkers overlay={overlay} />}
-      {perfOn && <PerfHud stats={overlayStats} renderer={overlayKind} />}
+      {perfOn && (
+        <PerfHud stats={overlayStats} renderer={overlayKind} data={hubStats} />
+      )}
     </div>
   );
 }

@@ -62,6 +62,11 @@ def test_ports_is_an_entity_module_the_worker_downloads_weekly() -> None:
     assert module.normalize_entities is normalize_entities
 
 
+def test_a_failed_download_is_not_retried_for_six_hours() -> None:
+    assert MANIFEST.honor_last_fetch is True
+    assert MANIFEST.min_retry_seconds == 6 * 3600
+
+
 def test_the_manifest_names_the_source_and_its_limits() -> None:
     provenance = MANIFEST.provenance
     assert provenance.source_id == "nga-wpi"

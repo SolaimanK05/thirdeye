@@ -1,4 +1,5 @@
 import type { EntityRow } from "@/api/client";
+import type { ColumnarStyle } from "@/components/console/layer-state";
 import type { Marker, MarkerSizing } from "@/components/console/markers";
 
 export const PLANE_MAX_SIZE = 22;
@@ -36,4 +37,8 @@ export function aircraftMarkers(rows: readonly EntityRow[]): Marker[] {
     adaptive: true,
     rotation: aircraftHeading(row),
   }));
+}
+
+export function aircraftStyle(): ColumnarStyle {
+  return { glyph: "plane", size: PLANE_MAX_SIZE, adaptive: true };
 }

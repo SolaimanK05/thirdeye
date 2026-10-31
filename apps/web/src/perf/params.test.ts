@@ -49,10 +49,27 @@ describe("readFlags", () => {
   });
 
   test("flags combine", () => {
-    expect(readFlags("?perf=1&bench=50000&renderer=canvas")).toEqual({
+    expect(
+      readFlags("?perf=1&bench=50000&renderer=canvas&worker=0&synthetic=1"),
+    ).toEqual({
       perf: true,
       bench: 50_000,
       renderer: "canvas",
+      worker: false,
+      synthetic: true,
     });
+  });
+
+  test("the worker path is on unless worker=0", () => {
+    expect(readFlags("").worker).toBe(true);
+    expect(readFlags("?worker=1").worker).toBe(true);
+    expect(readFlags("?worker=0").worker).toBe(false);
+    expect(readFlags("?worker=false").worker).toBe(true);
+  });
+
+  test("synthetic movers are drawn only for synthetic=1", () => {
+    expect(readFlags("").synthetic).toBe(false);
+    expect(readFlags("?synthetic=1").synthetic).toBe(true);
+    expect(readFlags("?synthetic=true").synthetic).toBe(false);
   });
 });

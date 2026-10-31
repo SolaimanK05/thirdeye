@@ -10,20 +10,27 @@ import { serverNowMs } from "@/state/stream";
 import { CanvasRenderer } from "./canvas-renderer";
 import { glyphIndex } from "./glyphs";
 import { cssToRgba } from "./gpu/colour";
-import { geodeticToEcef, MAX_LAYERS, WGS84_RADII } from "./gpu/encode";
+import {
+  ecefToGeodetic,
+  geodeticToEcef,
+  MAX_LAYERS,
+  WGS84_RADII,
+} from "./gpu/encode";
 import { createFrame, fillFrame, premultipliedTones } from "./gpu/frame";
 import { evaluateSegmentEcef } from "./gpu/segment-math";
 import { WebGlRenderer } from "./gpu/webgl-renderer";
 import {
   applyPositions,
   applySegments,
+  buildColumnarLayer,
   buildLayer,
+  type ColumnarStyle,
   dirtyRuns,
-  findIndex,
   freezeAt,
   hasDirty,
   type LayerState,
   markClean,
+  type SlotRows,
 } from "./layer-state";
 import type {
   LayerOptions,
@@ -56,6 +63,15 @@ export type { MarkerPalette } from "./renderer";
 export type OverlayChange = "layer" | "visibility" | "renderer";
 
 export type InViewReport = (counts: Readonly<Record<string, number>>) => void;
+
+export type ColumnarLayer = {
+  rows: SlotRows;
+  lon: Float64Array;
+  lat: Float64Array;
+  rotation: Float32Array;
+  style: ColumnarStyle;
+  starred: Uint32Array;
+};
 
 export type OverlayCanvases = {
   gl: HTMLCanvasElement;
@@ -205,6 +221,50 @@ export class MarkerOverlay {
     this.widget.scene.requestRender();
   }
 
+  /** A layer whose rows live in the data worker's columns. */
+  setColumnarLayer(
+    moduleId: string,
+    layer: ColumnarLayer,
+    stale: boolean,
+    sizing?: LayerSizing,
+    options?: LayerOptions,
+  ) {
+    const previous = this.layers.get(moduleId);
+    const slot = previous?.render.slot ?? this.allocateSlot(moduleId);
+    this.layers.set(
+      moduleId,
+      buildColumnarLayer({
+        moduleId,
+        slot,
+        ...layer,
+        stale,
+        sizing,
+        options,
+        previous,
+        selectedId: this.selectedId,
+        epoch: this.epoch,
+      }),
+    );
+    this.sweepDirty = true;
+    this.notify(moduleId, "layer");
+    this.widget.scene.requestRender();
+  }
+
+  /** Where an entity is drawn right now, whether or not it is moving. */
+  positionOfEntity(
+    moduleId: string,
+    id: string,
+  ): { lon: number; lat: number } | null {
+    const state = this.layers.get(moduleId);
+    if (!state) return null;
+    const index = state.rows.indexOf(id);
+    if (index < 0) return null;
+    const at = this.positionOf(state, index, this.clock() / 1000);
+    const found = { lon: 0, lat: 0 };
+    ecefToGeodetic(at[0], at[1], at[2], found);
+    return found;
+  }
+
   removeLayer(moduleId: string) {
     const state = this.layers.get(moduleId);
     if (!state) return;
@@ -233,7 +293,7 @@ export class MarkerOverlay {
   }
 
   markers(moduleId: string): readonly Marker[] | undefined {
-    return this.layers.get(moduleId)?.markers;
+    return this.layers.get(moduleId)?.markers ?? undefined;
   }
 
   isVisible(moduleId: string): boolean {
@@ -312,7 +372,7 @@ export class MarkerOverlay {
     if (id === this.selectedId) return;
     this.selectedId = id;
     for (const state of this.layers.values()) {
-      state.selectedIndex = findIndex(state.markers, id);
+      state.selectedIndex = state.rows.indexOf(id);
     }
     this.widget.scene.requestRender();
   }
@@ -323,7 +383,10 @@ export class MarkerOverlay {
     if (!found) return null;
     const moduleId = this.slots[found.slot];
     const state = moduleId ? this.layers.get(moduleId) : undefined;
-    const marker = state?.markers[found.marker];
+    const marker =
+      state && found.marker < state.render.count
+        ? state.rows.markerAt(found.marker)
+        : undefined;
     return state && marker ? { moduleId: state.moduleId, marker } : null;
   }
 
@@ -775,7 +838,7 @@ export class MarkerOverlay {
         if (!this.projectInView(at[0], at[1], at[2], point, width, height)) {
           continue;
         }
-        const marker = state.markers[i];
+        const marker = state.rows.markerAt(i);
         const size =
           render.adaptive[i] && render.sizedGlyph >= 0
             ? render.sizedSize

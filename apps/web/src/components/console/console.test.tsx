@@ -458,6 +458,7 @@ describe("client boundary", () => {
       "attribution.tsx",
       "clock.tsx",
       "console-shell.tsx",
+      "data-markers.tsx",
       "filter-menu.tsx",
       "globe-canvas.tsx",
       "globe-hud.tsx",

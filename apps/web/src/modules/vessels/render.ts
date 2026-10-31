@@ -1,4 +1,5 @@
 import type { EntityRow } from "@/api/client";
+import type { ColumnarStyle } from "@/components/console/layer-state";
 import type { Marker, MarkerSizing } from "@/components/console/markers";
 import type { ZoomLevel } from "@/components/console/types";
 
@@ -43,4 +44,13 @@ export function vesselMarkers(
     adaptive: !far,
     rotation: vesselHeading(row),
   }));
+}
+
+export function vesselStyle(context: { level: ZoomLevel }): ColumnarStyle {
+  const far = context.level < SHIPS_FROM_LEVEL;
+  return {
+    glyph: far ? "dot" : "ship",
+    size: far ? FAR_DOT_SIZE : SHIP_MAX_SIZE,
+    adaptive: !far,
+  };
 }

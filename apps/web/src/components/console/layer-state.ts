@@ -14,6 +14,7 @@ import {
   type LayerOptions,
   type LayerSizing,
   type Marker,
+  type MarkerGlyph,
   POSITION_STRIDE,
   SEGMENT_FADED,
   SEGMENT_H0,
@@ -32,9 +33,56 @@ import { DIRTY_BLOCK, type RenderLayer } from "./renderer";
 const RADIANS = Math.PI / 180;
 const DEGREES = 180 / Math.PI;
 
+/** What the overlay needs to know about the rows of a layer, however they are stored. */
+export interface RowSource {
+  readonly count: number;
+  idAt(index: number): string;
+  markerAt(index: number): Marker;
+  /** Row of the entity with this id, or -1. */
+  indexOf(id: string | null): number;
+}
+
+class MarkerRows implements RowSource {
+  readonly markers: readonly Marker[];
+
+  constructor(markers: readonly Marker[]) {
+    this.markers = markers;
+  }
+
+  get count(): number {
+    return this.markers.length;
+  }
+
+  idAt(index: number): string {
+    return this.markers[index].id;
+  }
+
+  markerAt(index: number): Marker {
+    return this.markers[index];
+  }
+
+  indexOf(id: string | null): number {
+    return findIndex(this.markers, id);
+  }
+}
+
+/** Rows that are slots of a data-worker module; they are in ascending slot order. */
+export interface SlotRows extends RowSource {
+  readonly slots: Uint32Array;
+}
+
+export function isSlotRows(rows: RowSource): rows is SlotRows {
+  return "slots" in rows;
+}
+
 export type LayerState = {
   moduleId: string;
-  markers: readonly Marker[];
+  /** The marker list for layers built from markers; null for columnar layers. */
+  markers: readonly Marker[] | null;
+  rows: RowSource;
+  /** Where each row sits before any motion, used when a segment has no position. */
+  homeLon: Float64Array;
+  homeLat: Float64Array;
   render: RenderLayer;
   lon: Float64Array;
   lat: Float64Array;
@@ -93,7 +141,8 @@ type BuildInput = {
 };
 
 export function buildLayer(input: BuildInput): LayerState {
-  const { markers, previous } = input;
+  const { markers } = input;
+  const previous = input.previous?.markers != null ? input.previous : undefined;
   const count = markers.length;
   const ecef = new Float64Array(count * 3);
   const lon = new Float64Array(count);
@@ -119,19 +168,20 @@ export function buildLayer(input: BuildInput): LayerState {
 
     let before = -1;
     if (previous) {
-      if (previous.markers[i]?.id === marker.id) {
+      const before_ = previous.markers;
+      if (before_?.[i]?.id === marker.id) {
         before = i;
       } else {
         if (lookup === null) {
           lookup = new Map();
-          previous.markers.forEach((old, index) => {
+          before_?.forEach((old, index) => {
             lookup?.set(old.id, index);
           });
         }
         before = lookup.get(marker.id) ?? -1;
       }
     }
-    const old = before >= 0 ? previous?.markers[before] : undefined;
+    const old = before >= 0 ? previous?.markers?.[before] : undefined;
     if (previous && old && old.lon === marker.lon && old.lat === marker.lat) {
       lon[i] = previous.lon[before];
       lat[i] = previous.lat[before];
@@ -184,7 +234,140 @@ export function buildLayer(input: BuildInput): LayerState {
     baseRotation,
     inverse,
     special: Uint32Array.from(special),
+    rows: new MarkerRows(markers),
+    homeLon: Float64Array.from(markers, (marker) => marker.lon),
+    homeLat: Float64Array.from(markers, (marker) => marker.lat),
     selectedIndex: findIndex(markers, input.selectedId),
+    reported: input.options?.reported ?? true,
+    needsSync: true,
+    mask: null,
+    inView: null,
+    zeros: null,
+    liveUntil: 0,
+  };
+}
+
+export type ColumnarStyle = {
+  glyph: MarkerGlyph;
+  size: number;
+  adaptive: boolean;
+};
+
+type ColumnarInput = {
+  moduleId: string;
+  slot: number;
+  rows: SlotRows;
+  lon: Float64Array;
+  lat: Float64Array;
+  rotation: Float32Array;
+  style: ColumnarStyle;
+  /** Rows that are starred: drawn in the accent tone with a permanent label. */
+  starred: Uint32Array;
+  stale: boolean;
+  sizing: LayerSizing | undefined;
+  options: LayerOptions | undefined;
+  previous: LayerState | undefined;
+  selectedId: string | null;
+  epoch: number;
+};
+
+/**
+ * The same layer as `buildLayer`, built from the data worker's columns. Every
+ * row shares one glyph, size and tone except the starred ones, so there is no
+ * per-row object at all.
+ */
+export function buildColumnarLayer(input: ColumnarInput): LayerState {
+  const { rows, style, previous } = input;
+  const count = rows.count;
+  const { slots } = rows;
+  const ecef = new Float64Array(count * 3);
+  const lon = new Float64Array(count);
+  const lat = new Float64Array(count);
+  const baseRotation = Float32Array.from(input.rotation);
+  const rotationDeg = Float32Array.from(input.rotation);
+  const glyph = new Uint8Array(count).fill(glyphIndex(style.glyph));
+  const size = new Uint8Array(count).fill(clampSize(style.size));
+  const tone = new Uint8Array(count);
+  const adaptive = new Uint8Array(count).fill(style.adaptive ? 1 : 0);
+
+  const before = previous && isSlotRows(previous.rows) ? previous : undefined;
+  const beforeSlots =
+    before && isSlotRows(before.rows) ? before.rows.slots : null;
+  let cursor = 0;
+  for (let i = 0; i < count; i++) {
+    let reuse = -1;
+    if (before && beforeSlots) {
+      while (cursor < beforeSlots.length && beforeSlots[cursor] < slots[i]) {
+        cursor++;
+      }
+      if (
+        cursor < beforeSlots.length &&
+        beforeSlots[cursor] === slots[i] &&
+        before.homeLon[cursor] === input.lon[i] &&
+        before.homeLat[cursor] === input.lat[i]
+      ) {
+        reuse = cursor;
+      }
+    }
+    if (before && reuse >= 0) {
+      lon[i] = before.lon[reuse];
+      lat[i] = before.lat[reuse];
+      ecef[i * 3] = before.render.ecef[reuse * 3];
+      ecef[i * 3 + 1] = before.render.ecef[reuse * 3 + 1];
+      ecef[i * 3 + 2] = before.render.ecef[reuse * 3 + 2];
+    } else {
+      lon[i] = input.lon[i];
+      lat[i] = input.lat[i];
+      geodeticToEcef(input.lon[i], input.lat[i], ecef, i * 3);
+    }
+  }
+
+  const accent = toneIndex("accent");
+  for (const row of input.starred) tone[row] = accent;
+
+  const { order, inverse } = partitionByTone(tone);
+  const render: RenderLayer = {
+    slot: input.slot,
+    count,
+    stale: input.stale,
+    pickable: input.options?.pickable ?? true,
+    order,
+    ecef,
+    rotationDeg,
+    glyph,
+    size,
+    tone,
+    adaptive,
+    faded: new Uint8Array(count),
+    fadedCount: 0,
+    sizing: input.sizing,
+    sizedGlyph: before?.render.sizedGlyph ?? -1,
+    sizedSize: before?.render.sizedSize ?? 0,
+    dirtyBlocks: new Uint8Array(Math.ceil(count / DIRTY_BLOCK)).fill(1),
+    dirtyCount: Math.ceil(count / DIRTY_BLOCK),
+    moving: false,
+    delta: null,
+    times: null,
+    headings: null,
+    epoch: input.epoch,
+  };
+  if (!input.sizing) {
+    render.sizedGlyph = -1;
+    render.sizedSize = 0;
+  }
+  return {
+    moduleId: input.moduleId,
+    markers: null,
+    rows,
+    homeLon: input.lon,
+    homeLat: input.lat,
+    render,
+    lon,
+    lat,
+    baseRotation,
+    inverse,
+    special: input.starred,
+    selectedIndex: rows.indexOf(input.selectedId),
     reported: input.options?.reported ?? true,
     needsSync: true,
     mask: null,
@@ -241,7 +424,7 @@ export function makeStatic(state: LayerState): void {
 }
 
 export function applyPositions(state: LayerState, data: Float64Array): boolean {
-  const { render, markers } = state;
+  const { render } = state;
   const count = render.count;
   if (data.length < count * POSITION_STRIDE) return false;
   makeStatic(state);
@@ -252,8 +435,8 @@ export function applyPositions(state: LayerState, data: Float64Array): boolean {
     let lon = data[at];
     let lat = data[at + 1];
     if (Number.isNaN(lon) || Number.isNaN(lat)) {
-      lon = markers[i].lon;
-      lat = markers[i].lat;
+      lon = state.homeLon[i];
+      lat = state.homeLat[i];
     }
     const turn = Math.fround(
       Number.isNaN(data[at + 2]) ? state.baseRotation[i] : data[at + 2],
@@ -290,10 +473,10 @@ export function applySegments(
   state: LayerState,
   update: SegmentUpdate,
 ): boolean {
-  const { render, markers } = state;
+  const { render } = state;
   const count = render.count;
-  const { data, rows } = update;
-  if (data.length < count * SEGMENT_STRIDE) return false;
+  const { data, rows, packed } = update;
+  if (!packed && data.length < count * SEGMENT_STRIDE) return false;
   if (!render.moving) {
     render.moving = true;
     render.delta = new Float64Array(count * 3);
@@ -314,7 +497,7 @@ export function applySegments(
   for (let k = 0; k < total; k++) {
     const i = rows === null ? k : rows[k];
     if (i >= count) continue;
-    const at = i * SEGMENT_STRIDE;
+    const at = (packed ? k : i) * SEGMENT_STRIDE;
     let lon0 = data[at + SEGMENT_LON0];
     let lat0 = data[at + SEGMENT_LAT0];
     let lon1 = data[at + SEGMENT_LON1];
@@ -322,8 +505,8 @@ export function applySegments(
     let start = data[at + SEGMENT_T0];
     let end = data[at + SEGMENT_T1];
     if (Number.isNaN(lon0) || Number.isNaN(lat0)) {
-      lon0 = markers[i].lon;
-      lat0 = markers[i].lat;
+      lon0 = state.homeLon[i];
+      lat0 = state.homeLat[i];
       lon1 = lon0;
       lat1 = lat0;
     } else if (Number.isNaN(lon1) || Number.isNaN(lat1)) {

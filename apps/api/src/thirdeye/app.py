@@ -22,6 +22,7 @@ from thirdeye.layers import (
     listen_for_layers,
 )
 from thirdeye.logs import configure_logging
+from thirdeye.movers import SYNTHETIC_ID, SyntheticFeed
 from thirdeye.reads import DbReader, SnapshotRecord, Viewport, ViewRecord
 from thirdeye.registry import REGISTRY, Module, check_default_on, enabled
 from thirdeye.routes import v1
@@ -77,6 +78,19 @@ def listener_connect(settings: Settings) -> Connect:
     return connect
 
 
+def synthetic_sources(settings: Settings) -> dict[str, SyntheticFeed]:
+    if not settings.synthetic_movers:
+        return {}
+    feed = SyntheticFeed(settings.synthetic_movers, seed=settings.synthetic_seed)
+    return {SYNTHETIC_ID: feed}
+
+
+async def tick_synthetic(broadcaster: Broadcaster, interval: float) -> None:
+    while True:
+        broadcaster.notify(SYNTHETIC_ID)
+        await asyncio.sleep(interval)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = app.state.settings
@@ -91,6 +105,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             for module in app.state.enabled_modules.values()
         },
         settings.instance_name,
+        sources=synthetic_sources(settings),
     )
     app.state.pool = pool
     app.state.layer_cache = cache
@@ -104,6 +119,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         ),
         asyncio.create_task(broadcaster.run(), name="stream-broadcaster"),
     ]
+    if settings.synthetic_movers:
+        tasks.append(
+            asyncio.create_task(
+                tick_synthetic(broadcaster, settings.synthetic_interval_seconds),
+                name="synthetic-movers",
+            )
+        )
     log.info("api.started", version=APP_VERSION, modules=settings.modules_enabled)
     try:
         with on_signals(TERMINATION, broadcaster.close):

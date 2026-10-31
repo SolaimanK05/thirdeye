@@ -5,6 +5,7 @@ import type {
   EventRow,
   FixOut,
 } from "@/api/client";
+import type { ColumnarStyle } from "@/components/console/layer-state";
 import type {
   ClusterInfo,
   LayerSizing,
@@ -16,7 +17,11 @@ import type {
   ZoomLevel,
 } from "@/components/console/types";
 import { aircraftRefine } from "./aircraft/refine";
-import { aircraftMarkers, aircraftSizing } from "./aircraft/render";
+import {
+  aircraftMarkers,
+  aircraftSizing,
+  aircraftStyle,
+} from "./aircraft/render";
 import { aircraftSelection } from "./aircraft/selection";
 import { quakeRefine } from "./earthquakes/refine";
 import { quakeMarkers } from "./earthquakes/render";
@@ -34,7 +39,7 @@ import {
 import { satelliteSelection } from "./satellites/selection";
 import { speedHistory } from "./vessels/history";
 import { vesselRefine } from "./vessels/refine";
-import { vesselMarkers, vesselSizing } from "./vessels/render";
+import { vesselMarkers, vesselSizing, vesselStyle } from "./vessels/render";
 import { vesselSelection } from "./vessels/selection";
 import { fireRefine } from "./wildfires/refine";
 import { fireMarkers } from "./wildfires/render";
@@ -87,6 +92,8 @@ type EntityViewBase = {
 
 export type StoredEntityView = EntityViewBase & {
   computed?: false;
+  /** How the data worker's columns are drawn; present for modules sent as binary frames. */
+  columnar?: (context: { level: ZoomLevel }) => ColumnarStyle;
   markers: (
     rows: readonly EntityRow[],
     context: { level: ZoomLevel },
@@ -106,12 +113,14 @@ export const ENTITY_VIEWS: Readonly<Record<string, EntityView>> = {
     selection: aircraftSelection,
     refine: aircraftRefine,
     sizing: aircraftSizing,
+    columnar: aircraftStyle,
   },
   vessels: {
     markers: vesselMarkers,
     selection: vesselSelection,
     refine: vesselRefine,
     sizing: vesselSizing,
+    columnar: vesselStyle,
     history: speedHistory,
   },
   ports: {

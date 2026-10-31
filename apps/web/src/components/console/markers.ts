@@ -41,6 +41,11 @@ export type SegmentUpdate = {
   data: Float64Array;
   rows: Uint32Array | null;
   count: number;
+  /**
+   * True when `data` holds only the listed rows, one after another, instead of
+   * a slot for every row of the layer.
+   */
+  packed?: boolean;
 };
 
 export type OverlayPort = {

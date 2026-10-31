@@ -260,6 +260,8 @@ def test_a_minimum_retry_interval_must_be_positive() -> None:
         ModuleManifest(**manifest_data(min_retry_seconds=0))
 
 
-def test_only_satellites_follow_the_fetch_courtesy_rules() -> None:
+def test_only_the_downloaded_reference_modules_follow_the_fetch_courtesy_rules() -> (
+    None
+):
     courteous = [m.id for m in REGISTRY.values() if m.manifest.honor_last_fetch]
-    assert courteous == ["satellites"]
+    assert sorted(courteous) == ["ports", "satellites"]

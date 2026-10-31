@@ -73,7 +73,7 @@ export function SelectionDock({ kind, name, children }: Props) {
         id={BODY_ID}
         data-rail="right"
         className={cx(
-          "min-h-0 overflow-y-auto overscroll-contain border-line border-t lg:flex-1 lg:border-t-0",
+          "rail-scroll min-h-0 overflow-y-auto overscroll-contain border-line border-t lg:flex-1 lg:border-t-0",
           expanded ? "block" : "hidden",
           collapsed ? "lg:hidden" : "lg:block",
         )}
