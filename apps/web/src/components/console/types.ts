@@ -1,0 +1,97 @@
+export type ZoomLevel = 1 | 2 | 3 | 4;
+
+export type Health =
+  | "fresh"
+  | "stale"
+  | "cooldown"
+  | "failed"
+  | "empty"
+  | "missing-key";
+
+export type Filter = "all" | "starred" | "none";
+
+export type LatLon = { lat: number; lon: number };
+
+export type GlobeStyle = "GREEN" | "NATURAL" | "BLACK";
+
+export type ConfidenceTag = "OBS" | "REP" | "DER" | "INF";
+
+export type ModuleRow = {
+  id: string;
+  name: string;
+  health: Health;
+  zoomRange: readonly [ZoomLevel, ZoomLevel] | null;
+  maxPercent?: number;
+  filter: Filter;
+  /** The level the user pinned the module at with SHOW HERE, if they did. */
+  pinned?: ZoomLevel;
+  loaded: number;
+  starredCount: number;
+  inView?: number;
+  capped?: { shown: number; matched: number };
+  missingKey?: string;
+  failure?: string;
+  lastGood?: string;
+  cooldownUntil?: string;
+};
+
+export type DomainGroup = {
+  label: string;
+  modules: readonly ModuleRow[];
+};
+
+export type StarredEntity = {
+  id: string;
+  name: string;
+  moduleId: string;
+  module: string;
+  position: LatLon | null;
+  age: string;
+  tone: "normal" | "stale" | "gap";
+};
+
+export type SelectionRow = {
+  key: string;
+  value: string;
+  confidence: ConfidenceTag;
+};
+
+export type SelectionAction = "star" | "follow" | "center";
+
+export type ChartPoint = { t: number; v: number };
+
+export type SelectionChart = {
+  label: string;
+  unit: string;
+  points: readonly ChartPoint[];
+};
+
+export type Selection = {
+  kind: string;
+  name: string;
+  subline: string;
+  starred: boolean;
+  following?: boolean;
+  actions: readonly SelectionAction[];
+  chart?: SelectionChart;
+  sections: readonly { label: string; rows: readonly SelectionRow[] }[];
+  provenance: {
+    source: string;
+    retrieved: string;
+    reliability: string;
+    licence: string;
+  };
+  limitations: readonly string[];
+};
+
+export type StatusLine = {
+  health: Health;
+  text: string;
+};
+
+export type ConsoleSnapshot = {
+  instance: string;
+  zoomPercent: number;
+  centre: LatLon;
+  globeStyle: GlobeStyle;
+};

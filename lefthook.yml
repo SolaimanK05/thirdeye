@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=https://lefthook.dev/schema.json
+
+pre-commit:
+  parallel: true
+  jobs:
+    - name: biome
+      root: apps/web/
+      glob: "*.{js,ts,cjs,mjs,jsx,tsx,json,jsonc,css}"
+      run: pnpm exec biome check --write --no-errors-on-unmatched --files-ignore-unknown=true {staged_files}
+      stage_fixed: true
+
+    - name: ruff
+      root: apps/api/
+      glob: "*.py"
+      run: uv run ruff check --fix {staged_files} && uv run ruff format {staged_files}
+      stage_fixed: true
+
+# Pre-push stays quick on purpose: style and types only. The full test suite
+# (vitest, pytest, mypy) runs on GitHub Actions for every push and pull request.
+pre-push:
+  parallel: true
+  jobs:
+    - name: web
+      run: pnpm --dir apps/web exec biome check && pnpm --dir apps/web exec next typegen && pnpm --dir apps/web exec tsc --noEmit
+
+    - name: api
+      root: apps/api/
+      run: uv run ruff check . && uv run ruff format --check .

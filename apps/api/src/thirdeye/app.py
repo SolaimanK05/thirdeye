@@ -1,0 +1,195 @@
+import asyncio
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager, suppress
+from datetime import datetime
+from typing import Any
+
+import psycopg
+import structlog
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+
+from thirdeye.config import Settings, get_settings
+from thirdeye.db import SESSION_OPTIONS, Pool, create_pool
+from thirdeye.elements import ElementsCache
+from thirdeye.errors import register_error_handlers
+from thirdeye.layers import (
+    Connect,
+    LayerCache,
+    Loader,
+    ViewLoader,
+    listen_for_layers,
+)
+from thirdeye.logs import configure_logging
+from thirdeye.movers import SYNTHETIC_ID, SyntheticFeed
+from thirdeye.reads import DbReader, SnapshotRecord, Viewport, ViewRecord
+from thirdeye.registry import REGISTRY, Module, check_default_on, enabled
+from thirdeye.routes import v1
+from thirdeye.routes.health import APP_VERSION
+from thirdeye.signals import TERMINATION, on_signals
+from thirdeye.stream import Broadcaster, FetchedAt
+from thirdeye.worker import run as run_worker
+
+log = structlog.get_logger()
+
+GZIP_MINIMUM_BYTES = 1024
+
+
+def snapshot_loader(pool: Pool) -> Loader:
+    async def load(module_id: str) -> SnapshotRecord | None:
+        async with pool.connection() as conn:
+            return await DbReader(conn).snapshot(module_id)
+
+    return load
+
+
+def view_loader(pool: Pool, registry: Mapping[str, Module]) -> ViewLoader:
+    async def load(module_id: str, viewport: Viewport) -> ViewRecord | None:
+        lookback = registry[module_id].manifest.viewport_lookback_seconds
+        if lookback is None:
+            raise ValueError(f"module {module_id!r} has no viewport lookback")
+        async with pool.connection() as conn:
+            return await DbReader(conn).window(module_id, lookback, viewport)
+
+    return load
+
+
+def fetched_at_loader(pool: Pool) -> FetchedAt:
+    async def load(module_id: str) -> datetime | None:
+        async with pool.connection() as conn:
+            return await DbReader(conn).fetched_at(module_id)
+
+    return load
+
+
+def listener_connect(settings: Settings) -> Connect:
+    async def connect() -> psycopg.AsyncConnection[Any]:
+        return await psycopg.AsyncConnection.connect(
+            str(settings.database_url),
+            autocommit=True,
+            options=SESSION_OPTIONS,
+            connect_timeout=int(settings.db_timeout_seconds),
+            keepalives=1,
+            keepalives_idle=30,
+            keepalives_interval=10,
+            keepalives_count=3,
+        )
+
+    return connect
+
+
+def synthetic_sources(settings: Settings) -> dict[str, SyntheticFeed]:
+    if not settings.synthetic_movers:
+        return {}
+    feed = SyntheticFeed(settings.synthetic_movers, seed=settings.synthetic_seed)
+    return {SYNTHETIC_ID: feed}
+
+
+async def tick_synthetic(broadcaster: Broadcaster, interval: float) -> None:
+    while True:
+        broadcaster.notify(SYNTHETIC_ID)
+        await asyncio.sleep(interval)
+
+
+def log_worker_end(task: asyncio.Task[int]) -> None:
+    """The API keeps serving what is stored if the worker inside it dies."""
+    if task.cancelled():
+        return
+    error = task.exception()
+    if error is not None:
+        log.error("worker.crashed", error=f"{type(error).__name__}: {error}")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    settings: Settings = app.state.settings
+    pool = create_pool(settings)
+    await pool.open()
+    cache = LayerCache(snapshot_loader(pool), view_loader(pool, app.state.registry))
+    broadcaster = Broadcaster(
+        cache,
+        fetched_at_loader(pool),
+        {
+            module.id: module.manifest.kind
+            for module in app.state.enabled_modules.values()
+        },
+        settings.instance_name,
+        sources=synthetic_sources(settings),
+    )
+    app.state.pool = pool
+    app.state.layer_cache = cache
+    app.state.broadcaster = broadcaster
+    tasks: list[asyncio.Task[Any]] = [
+        asyncio.create_task(
+            listen_for_layers(
+                listener_connect(settings), cache, on_update=broadcaster.notify
+            ),
+            name="layer-listener",
+        ),
+        asyncio.create_task(broadcaster.run(), name="stream-broadcaster"),
+    ]
+    if settings.synthetic_movers:
+        tasks.append(
+            asyncio.create_task(
+                tick_synthetic(broadcaster, settings.synthetic_interval_seconds),
+                name="synthetic-movers",
+            )
+        )
+    if settings.run_worker:
+        worker = asyncio.create_task(
+            run_worker(settings, once=False, pool=pool), name="worker"
+        )
+        worker.add_done_callback(log_worker_end)
+        tasks.append(worker)
+    log.info(
+        "api.started",
+        version=APP_VERSION,
+        modules=settings.modules_enabled,
+        worker=settings.run_worker,
+    )
+    try:
+        with on_signals(TERMINATION, broadcaster.close):
+            yield
+    finally:
+        broadcaster.close()
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            with suppress(asyncio.CancelledError, Exception):
+                await task
+        await pool.close()
+        log.info("api.stopped")
+
+
+def create_app(
+    settings: Settings | None = None, registry: Mapping[str, Module] = REGISTRY
+) -> FastAPI:
+    settings = settings or get_settings()
+    configure_logging(settings)
+    app = FastAPI(title="Third Eye API", version=APP_VERSION, lifespan=lifespan)
+    app.state.settings = settings
+    app.state.registry = registry
+    app.state.elements_cache = ElementsCache()
+    app.state.enabled_modules = {
+        m.id: m for m in enabled(settings.modules_enabled, registry)
+    }
+    app.state.default_on = check_default_on(
+        (
+            settings.modules_enabled
+            if settings.modules_default_on is None
+            else settings.modules_default_on
+        ),
+        registry,
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_methods=["GET", "PUT", "DELETE"],
+        allow_headers=["Content-Type", "Last-Event-ID"],
+        expose_headers=["ETag", "Last-Modified"],
+    )
+    app.add_middleware(GZipMiddleware, minimum_size=GZIP_MINIMUM_BYTES)
+    register_error_handlers(app)
+    app.include_router(v1)
+    return app
